@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bomberman - Multiplayer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- PIN join-skærm -->
+    <div id="join-screen">
+      <h1>Bomberman</h1>
+      <p class="join-hint">Indtast PIN fra spillet for at deltage</p>
+      <div class="join-form">
+        <input type="text" id="pin-input" placeholder="PIN (fx 1234)" maxlength="8" autocomplete="off">
+        <input type="text" id="name-input" placeholder="Navn (valgfri)" maxlength="20" autocomplete="off">
+        <button id="btn-join">Join spil</button>
+      </div>
+      <p id="join-error" class="join-error hidden"></p>
+      <a href="/admin.html" class="admin-link">Admin – opret spil</a>
+    </div>
+
+    <!-- Spil-skærm (skjult indtil join) -->
+    <div id="game-screen" class="hidden">
+      <header>
+        <h1>Bomberman</h1>
+        <div id="status">Forbinder...</div>
+        <div id="controls">
+          <button id="btn-start" disabled>Start spil</button>
+          <button id="btn-reset" disabled>Nyt spil</button>
+        </div>
+      </header>
+
+      <div id="stats-panel"></div>
+      <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        <div id="overlay" class="hidden">
+          <div id="overlay-content">
+            <h2 id="overlay-title">Venter på spillere</h2>
+            <p id="overlay-text">Tryk "Start spil" for at begynde</p>
+          </div>
+        </div>
+      </div>
+
+      <footer>
+        <p>Pil eller WASD: Bevæg | Mellemrum: Placer bombe</p>
+        <p id="player-info"></p>
+      </footer>
+    </div>
+  </div>
+
+  <script src="game-client.js"></script>
+</body>
+</html>

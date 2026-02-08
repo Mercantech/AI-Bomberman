@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bomberman - Spectator</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="spectate-app">
+    <div id="spectate-join">
+      <h1>Bomberman Spectator</h1>
+      <p class="spectate-hint">Indtast PIN for at se spillet</p>
+      <div class="join-form">
+        <input type="text" id="pin-input" placeholder="PIN" maxlength="8" autocomplete="off">
+        <button id="btn-watch">Se spil</button>
+      </div>
+      <p id="spectate-error" class="join-error hidden"></p>
+      <a href="/" class="admin-link">Tilbage til spil</a>
+    </div>
+
+    <div id="spectate-view" class="hidden">
+      <header>
+        <h1>Bomberman Spectator</h1>
+        <div id="status">Forbinder...</div>
+      </header>
+      <div id="stats-panel"></div>
+      <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+      </div>
+      <footer>
+        <p>Du ser spillet som tilskuer</p>
+        <p id="spectate-info"></p>
+      </footer>
+    </div>
+  </div>
+
+  <script src="spectate-client.js"></script>
+</body>
+</html>

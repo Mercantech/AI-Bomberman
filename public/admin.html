@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bomberman Admin</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <div id="admin-app">
+    <header>
+      <h1>Bomberman Admin</h1>
+      <a href="/" class="back-link">← Tilbage til spil</a>
+    </header>
+
+    <section id="create-lobby">
+      <h2>Opret nyt spil</h2>
+      <form id="create-form">
+        <div class="form-row">
+          <label for="pin-input">PIN (valgfri, ellers genereres automatisk)</label>
+          <input type="text" id="pin-input" placeholder="fx 1234" maxlength="8" pattern="[0-9]*">
+        </div>
+        <div class="form-row">
+          <label for="grid-size">Bane størrelse</label>
+          <select id="grid-size">
+            <option value="9">9×9 (lille)</option>
+            <option value="11">11×11</option>
+            <option value="13" selected>13×13 (standard)</option>
+            <option value="15">15×15</option>
+            <option value="17">17×17</option>
+            <option value="19">19×19</option>
+            <option value="21">21×21 (stor)</option>
+          </select>
+        </div>
+        <button type="submit">Opret spil</button>
+      </form>
+      <div id="create-result" class="result hidden"></div>
+    </section>
+
+    <section id="active-lobbies">
+      <h2>Aktive spil</h2>
+      <div id="lobby-list"></div>
+      <p id="no-lobbies" class="muted">Ingen aktive spil</p>
+    </section>
+  </div>
+
+  <script src="admin-client.js"></script>
+</body>
+</html>

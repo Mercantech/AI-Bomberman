@@ -1,0 +1,273 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #eee;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#app {
+  text-align: center;
+  padding: 20px;
+}
+
+header {
+  margin-bottom: 20px;
+}
+
+header h1 {
+  font-size: 2.5rem;
+  margin-bottom: 10px;
+  text-shadow: 0 0 20px rgba(255, 200, 100, 0.5);
+}
+
+#status {
+  font-size: 0.95rem;
+  margin-bottom: 15px;
+  min-height: 24px;
+}
+
+#status.connected {
+  color: #2ecc71;
+}
+
+#status.disconnected {
+  color: #e74c3c;
+}
+
+#controls {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+#controls button {
+  padding: 10px 24px;
+  font-size: 1rem;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #3498db;
+  color: white;
+  transition: background 0.2s;
+}
+
+#controls button:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+#controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#controls #btn-reset {
+  background: #e67e22;
+}
+
+#controls #btn-reset:hover:not(:disabled) {
+  background: #d35400;
+}
+
+#game-container {
+  position: relative;
+  display: inline-block;
+  background: #0f0f1a;
+  border-radius: 12px;
+  padding: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 0 0 2px rgba(255, 255, 255, 0.05);
+}
+
+#game-canvas {
+  display: block;
+  background: #1a1a2e;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  border-radius: 4px;
+}
+
+#overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#overlay.hidden {
+  display: none;
+}
+
+#overlay-content {
+  padding: 40px;
+}
+
+#overlay-title {
+  font-size: 2rem;
+  margin-bottom: 10px;
+}
+
+#overlay-text {
+  font-size: 1.1rem;
+  opacity: 0.9;
+}
+
+#overlay.victory #overlay-title {
+  color: #2ecc71;
+}
+
+#overlay.defeat #overlay-title {
+  color: #e74c3c;
+}
+
+footer {
+  margin-top: 20px;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+footer p {
+  margin: 5px 0;
+}
+
+#player-info {
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+/* Join-skærm */
+#join-screen {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.join-hint {
+  margin-bottom: 20px;
+  opacity: 0.9;
+}
+
+.join-form {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.join-form input {
+  padding: 12px 16px;
+  font-size: 1.1rem;
+  border: 2px solid #444;
+  border-radius: 8px;
+  background: #1a1a2e;
+  color: #eee;
+  width: 140px;
+}
+
+.join-form input:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.join-form button {
+  padding: 12px 24px;
+  font-size: 1rem;
+  border: none;
+  border-radius: 8px;
+  background: #3498db;
+  color: white;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.join-form button:hover {
+  background: #2980b9;
+}
+
+.join-error {
+  color: #e74c3c;
+  margin-bottom: 16px;
+  font-size: 0.95rem;
+}
+
+.join-error.hidden {
+  display: none;
+}
+
+.admin-link {
+  color: #3498db;
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.admin-link:hover {
+  text-decoration: underline;
+}
+
+.spectate-hint {
+  margin-bottom: 20px;
+  opacity: 0.9;
+}
+
+/* Stats panel */
+#stats-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 10px;
+  border: 1px solid #333;
+  min-width: 180px;
+}
+
+.stat-card-me {
+  border-color: #3498db;
+  box-shadow: 0 0 12px rgba(52, 152, 219, 0.3);
+}
+
+.stat-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.stat-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-name {
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+.stat-row {
+  display: flex;
+  gap: 12px;
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
