@@ -141,14 +141,23 @@ function updateStatus(text, connected) {
   }
 }
 
+function isTypingInInput() {
+  const el = document.activeElement;
+  return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.getAttribute('contenteditable') === 'true');
+}
+
 function setupControls() {
   document.addEventListener('keydown', (e) => {
+    if (isTypingInInput()) return;
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) {
       e.preventDefault();
       keys[e.code] = true;
     }
   });
-  document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+  document.addEventListener('keyup', (e) => {
+    if (isTypingInInput()) return;
+    keys[e.code] = false;
+  });
 }
 
 function setupButtons() {

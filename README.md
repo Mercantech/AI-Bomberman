@@ -31,6 +31,13 @@ npm start
 - **Aktive spil**: Se alle lobbies med PIN, spillere, status
 - **Afslut session**: Luk et spil og kick alle spillere
 
+## Turnering (lobby-baseret)
+
+- Gå til `/tournament.html`
+- **Opret turnering**: Vælg kamptype (en efter hinanden / parallelt) og max antal deltagere (2–32, fx 28 elever). Du får en **join-kode** og et link.
+- **Elever/deltagere**: Åbn linket (fx `tournament.html?code=ABC123`) eller indtast koden, skriv navn og tryk "Join". Op til 28 (eller det valgte max) kan tilmelde sig.
+- **Start**: Når mindst 2 er tilmeldt, kan arrangøren trykke "Start turnering". Bracket genereres, og du starter hver kamp med "Start kamp"; spillere deltager via PIN som normalt. Vinderen avancerer automatisk.
+
 ## Spectator
 
 - Gå til `/spectate.html`

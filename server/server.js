@@ -10,11 +10,15 @@ const fs = require('fs');
 const { URL } = require('url');
 
 const { BombermanGame } = require('./game');
+const tournamentModule = require('./tournament');
 
 const PORT = process.env.PORT || 8080;
 
-// Lobbies: PIN -> { game, clients: Set<ws>, createdAt }
+// Lobbies: PIN -> { game, clients: Set<ws>, spectators, createdAt, tournamentId?, tournamentMatchId?, participantNames? }
 const lobbies = new Map();
+// Tournaments: id -> tournament state; joinCode -> id (for lookup by code)
+const tournaments = new Map();
+const tournamentByCode = new Map();
 
 // Klienter uden lobby (venter på join)
 const pendingClients = new Map();
@@ -121,6 +125,171 @@ function handleAdminApi(req, res) {
   res.end(JSON.stringify({ error: 'Not found' }));
 }
 
+// Tournament API
+function handleTournamentApi(req, res) {
+  const parsed = new URL(req.url, `http://localhost:${PORT}`);
+  const pathname = parsed.pathname;
+  res.setHeader('Content-Type', 'application/json');
+
+  if (pathname === '/api/tournament' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { mode = 'sequential', maxParticipants = 28 } = JSON.parse(body || '{}');
+        const tournament = tournamentModule.createTournamentLobby(mode, maxParticipants);
+        tournaments.set(tournament.id, tournament);
+        tournamentByCode.set(tournament.joinCode.toUpperCase(), tournament.id);
+        res.writeHead(201);
+        res.end(JSON.stringify({ tournament }));
+      } catch (e) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Ugyldig forespørgsel' }));
+      }
+    });
+    return;
+  }
+
+  const byCodeMatch = pathname.match(/^\/api\/tournament\/by-code\/([^/]+)$/);
+  if (byCodeMatch && req.method === 'GET') {
+    const code = (byCodeMatch[1] || '').toUpperCase();
+    const tId = tournamentByCode.get(code) || tournaments.get(code);
+    const t = tId ? tournaments.get(tId) : null;
+    if (!t) {
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'Turnering ikke fundet' }));
+      return;
+    }
+    const standings = tournamentModule.getStandings(t);
+    const nextMatches = t.rounds ? tournamentModule.getNextMatches(t) : [];
+    res.writeHead(200);
+    res.end(JSON.stringify({ tournament: t, standings, nextMatches }));
+    return;
+  }
+
+  const getMatch = pathname.match(/^\/api\/tournament\/([^/]+)$/);
+  if (getMatch && req.method === 'GET') {
+    const idOrCode = getMatch[1];
+    const codeId = tournamentByCode.get(idOrCode.toUpperCase());
+    const t = codeId ? tournaments.get(codeId) : tournaments.get(idOrCode);
+    if (!t) {
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'Turnering ikke fundet' }));
+      return;
+    }
+    const standings = tournamentModule.getStandings(t);
+    const nextMatches = t.rounds ? tournamentModule.getNextMatches(t) : [];
+    res.writeHead(200);
+    res.end(JSON.stringify({ tournament: t, standings, nextMatches }));
+    return;
+  }
+
+  const joinMatch = pathname.match(/^\/api\/tournament\/([^/]+)\/join$/);
+  if (joinMatch && req.method === 'POST') {
+    const codeId = tournamentByCode.get((joinMatch[1] || '').toUpperCase());
+    const t = codeId ? tournaments.get(codeId) : tournaments.get(joinMatch[1]);
+    if (!t) {
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'Turnering ikke fundet' }));
+      return;
+    }
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { name } = JSON.parse(body || '{}');
+        const result = tournamentModule.addParticipant(t, name);
+        if (!result.ok) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: result.error }));
+          return;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify({ tournament: t }));
+      } catch (e) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Ugyldig forespørgsel' }));
+      }
+    });
+    return;
+  }
+
+  const startMatch = pathname.match(/^\/api\/tournament\/([^/]+)\/start$/);
+  if (startMatch && req.method === 'POST') {
+    const codeId = tournamentByCode.get((startMatch[1] || '').toUpperCase());
+    const t = codeId ? tournaments.get(codeId) : tournaments.get(startMatch[1]);
+    if (!t) {
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'Turnering ikke fundet' }));
+      return;
+    }
+    const result = tournamentModule.startTournament(t);
+    if (!result.ok) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ error: result.error }));
+      return;
+    }
+    const standings = tournamentModule.getStandings(t);
+    const nextMatches = tournamentModule.getNextMatches(t);
+    res.writeHead(200);
+    res.end(JSON.stringify({ tournament: t, standings, nextMatches }));
+    return;
+  }
+
+  const startMatchMatch = pathname.match(/^\/api\/tournament\/([^/]+)\/match\/start$/);
+  if (startMatchMatch && req.method === 'POST') {
+    const tId = startMatchMatch[1];
+    const t = tournaments.get(tId);
+    if (!t) {
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'Turnering ikke fundet' }));
+      return;
+    }
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { matchId } = JSON.parse(body || '{}');
+        const next = tournamentModule.getNextMatches(t);
+        const match = next.find(m => m.id === matchId) || (matchId ? t.rounds[t.currentRoundIndex].matches.find(m => m.id === matchId) : next[0]);
+        if (!match || match.status !== 'pending') {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'Kamp kan ikke startes' }));
+          return;
+        }
+        const pin = generatePin();
+        if (lobbies.has(pin)) {
+          res.writeHead(409);
+          res.end(JSON.stringify({ error: 'Prøv igen' }));
+          return;
+        }
+        const game = new BombermanGame(13);
+        lobbies.set(pin, {
+          game,
+          clients: new Set(),
+          spectators: new Set(),
+          createdAt: Date.now(),
+          tournamentId: tId,
+          tournamentMatchId: match.id,
+          participantNames: [match.player1, match.player2],
+          playerIdToName: {},
+        });
+        match.lobbyPin = pin;
+        match.status = 'live';
+        res.writeHead(200);
+        res.end(JSON.stringify({ pin, matchId: match.id }));
+      } catch (e) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Fejl' }));
+      }
+    });
+    return;
+  }
+
+  res.writeHead(404);
+  res.end(JSON.stringify({ error: 'Not found' }));
+}
+
 // CORS headers til alle requests
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -140,6 +309,10 @@ const server = http.createServer((req, res) => {
 
   if (req.url && req.url.startsWith('/api/admin/')) {
     handleAdminApi(req, res);
+    return;
+  }
+  if (req.url && req.url.startsWith('/api/tournament')) {
+    handleTournamentApi(req, res);
     return;
   }
 
@@ -203,6 +376,11 @@ wss.on('connection', (ws) => {
           const name = msg.name ? String(msg.name).trim().slice(0, 20) : null;
           lobby.game.addPlayer(playerId, name || `Player ${playerIdCounter}`);
           lobby.clients.add(ws);
+          if (lobby.participantNames && lobby.playerIdToName) {
+            const joinIndex = lobby.clients.size - 1;
+            const assignedName = lobby.participantNames[Math.min(joinIndex, lobby.participantNames.length - 1)];
+            lobby.playerIdToName[playerId] = assignedName;
+          }
 
           sendTo(ws, 'joined', { playerId, pin, state: lobby.game.getState() });
           broadcastToLobby(pin, { type: 'state', data: lobby.game.getState() });
@@ -309,13 +487,23 @@ function handleInput(pin, playerId, input) {
   }
 }
 
-// Broadcast state til aktive spil (inkl. ended, så klienter får slut-tilstanden)
+// Broadcast state + tournament-afslutning ved game end
 setInterval(() => {
   for (const [pin, lobby] of lobbies) {
     const hasClients = lobby.clients.size > 0 || (lobby.spectators && lobby.spectators.size > 0);
     const isActive = lobby.game.gameState === 'playing' || lobby.game.gameState === 'ended';
     if (hasClients && isActive) {
       broadcastToLobby(pin, { type: 'state', data: lobby.game.getState() });
+    }
+    if (lobby.game.gameState === 'ended' && lobby.tournamentMatchId && lobby.tournamentId) {
+      const t = tournaments.get(lobby.tournamentId);
+      const winnerId = lobby.game.winnerId;
+      const winnerName = (lobby.playerIdToName && winnerId && lobby.playerIdToName[winnerId]) || winnerId;
+      if (t && winnerName) {
+        tournamentModule.advanceWinner(t, lobby.tournamentMatchId, winnerName);
+      }
+      lobby.tournamentMatchId = null;
+      lobby.tournamentId = null;
     }
   }
 }, 50);
@@ -324,4 +512,5 @@ server.listen(PORT, () => {
   console.log(`Bomberman server: http://localhost:${PORT}`);
   console.log(`Admin: http://localhost:${PORT}/admin.html`);
   console.log(`Spectator: http://localhost:${PORT}/spectate.html`);
+  console.log(`Turnering: http://localhost:${PORT}/tournament.html`);
 });

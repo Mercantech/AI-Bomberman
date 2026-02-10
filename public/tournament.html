@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bomberman Turnering</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="admin.css">
+  <link rel="stylesheet" href="tournament.css">
+</head>
+<body>
+  <div id="tournament-app">
+    <header>
+      <h1>Turnering</h1>
+      <div>
+        <a href="/admin.html" class="back-link">Admin</a>
+        <a href="/" class="back-link">← Tilbage til spil</a>
+      </div>
+    </header>
+
+    <!-- Opret turnering -->
+    <section id="create-tournament">
+      <h2>Opret turnering</h2>
+      <p class="hint">Elever/deltagere joiner selv med join-koden – op til 28 kan deltage.</p>
+      <form id="tournament-form">
+        <div class="form-row">
+          <label for="tournament-mode">Kampe</label>
+          <select id="tournament-mode">
+            <option value="sequential">En efter hinanden</option>
+            <option value="parallel">Parallelt (flere kampe samtidig)</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="max-participants">Max antal deltagere (2–32)</label>
+          <input type="number" id="max-participants" min="2" max="32" value="28">
+        </div>
+        <button type="submit">Opret turnering</button>
+      </form>
+      <div id="create-tournament-result" class="result hidden"></div>
+    </section>
+
+    <!-- Lobby: join-kode + deltagere + start-knap -->
+    <section id="tournament-lobby" class="hidden">
+      <h2>Lobby</h2>
+      <p class="join-info">Del denne kode med deltagerne: <strong id="join-code"></strong></p>
+      <p class="join-link-wrap">Link: <a id="join-link" href="" target="_blank"></a></p>
+      <div id="lobby-participants"></div>
+      <button id="btn-start-tournament" disabled>Start turnering</button>
+      <p id="lobby-min-hint" class="muted">Mindst 2 skal være tilmeldt før start.</p>
+    </section>
+
+    <!-- Join en turnering (når man kommer via ?code=XXX) -->
+    <section id="join-lobby" class="hidden">
+      <h2>Join turnering</h2>
+      <form id="join-form">
+        <div class="form-row">
+          <label for="join-name">Dit navn</label>
+          <input type="text" id="join-name" placeholder="Fx fornavn" maxlength="30" required>
+        </div>
+        <button type="submit">Join</button>
+      </form>
+      <p id="join-lobby-error" class="result error hidden"></p>
+      <div id="join-lobby-participants"></div>
+    </section>
+
+    <!-- Bracket og kampe (efter start) -->
+    <section id="tournament-view" class="hidden">
+      <h2>Kamp-program</h2>
+      <div id="standings"></div>
+      <div id="bracket"></div>
+      <div id="next-matches"></div>
+    </section>
+  </div>
+
+  <script src="tournament-client.js"></script>
+</body>
+</html>
