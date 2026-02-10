@@ -68,13 +68,6 @@ function handleAdminApi(req, res) {
   const path = parsed.pathname;
 
   res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
 
   if (path === '/api/admin/lobbies' && req.method === 'GET') {
     res.writeHead(200);
@@ -128,8 +121,23 @@ function handleAdminApi(req, res) {
   res.end(JSON.stringify({ error: 'Not found' }));
 }
 
+// CORS headers til alle requests
+function setCorsHeaders(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
 // HTTP server - admin API først, derefter statiske filer
 const server = http.createServer((req, res) => {
+  setCorsHeaders(res);
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   if (req.url && req.url.startsWith('/api/admin/')) {
     handleAdminApi(req, res);
     return;
@@ -162,7 +170,14 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocket.Server({ server });
+// WebSocket server med CORS (tillader alle origins)
+const wss = new WebSocket.Server({ 
+  server,
+  verifyClient: (info) => {
+    // Tillad alle origins for WebSocket
+    return true;
+  }
+});
 
 wss.on('connection', (ws) => {
   ws.playerId = null;

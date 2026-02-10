@@ -2,6 +2,8 @@
 
 Klassisk Bomberman multiplayer spil med WebSockets.
 
+**Live:** [https://bomberman.mercantec.tech/](https://bomberman.mercantec.tech/)
+
 ## Arkitektur
 
 - **Backend** (`server/`): Standalone Node.js WebSocket server med al spil-logik og state

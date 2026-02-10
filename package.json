@@ -1,0 +1,10 @@
+{
+  "name": "ai-bomberman",
+  "private": true,
+  "scripts": {
+    "convert:sprites": "node scripts/convert-sprites.js"
+  },
+  "devDependencies": {
+    "xpm2png": "^1.0.1"
+  }
+}
