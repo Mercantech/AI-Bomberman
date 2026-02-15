@@ -34,6 +34,7 @@ function init() {
 
   setupControls();
   setupButtons();
+  setupArduinoController();
   requestAnimationFrame(renderLoop);
 }
 
@@ -141,14 +142,81 @@ function updateStatus(text, connected) {
   }
 }
 
+function isTypingInInput() {
+  const el = document.activeElement;
+  return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.getAttribute('contenteditable') === 'true');
+}
+
 function setupControls() {
   document.addEventListener('keydown', (e) => {
+    if (isTypingInInput()) return;
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) {
       e.preventDefault();
       keys[e.code] = true;
     }
   });
-  document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+  document.addEventListener('keyup', (e) => {
+    if (isTypingInInput()) return;
+    keys[e.code] = false;
+  });
+}
+
+let serialReader = null;
+let serialPort = null;
+
+function applyArduinoCommand(cmd) {
+  const c = String(cmd).trim().toUpperCase();
+  if (c === 'UP') { keys['ArrowUp'] = true; keys['KeyW'] = true; }
+  else if (c === 'RELEASE_UP') { keys['ArrowUp'] = false; keys['KeyW'] = false; }
+  else if (c === 'DOWN') { keys['ArrowDown'] = true; keys['KeyS'] = true; }
+  else if (c === 'RELEASE_DOWN') { keys['ArrowDown'] = false; keys['KeyS'] = false; }
+  else if (c === 'LEFT') { keys['ArrowLeft'] = true; keys['KeyA'] = true; }
+  else if (c === 'RELEASE_LEFT') { keys['ArrowLeft'] = false; keys['KeyA'] = false; }
+  else if (c === 'RIGHT') { keys['ArrowRight'] = true; keys['KeyD'] = true; }
+  else if (c === 'RELEASE_RIGHT') { keys['ArrowRight'] = false; keys['KeyD'] = false; }
+  else if (c === 'BOMB') { keys['Space'] = true; }
+}
+
+async function connectArduinoController() {
+  if (!('serial' in navigator)) {
+    alert('Web Serial understøttes ikke i denne browser. Brug Chrome eller Edge.');
+    return;
+  }
+  try {
+    const port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    serialPort = port;
+    const el = document.getElementById('arduino-status');
+    if (el) { el.textContent = 'Arduino forbundet'; el.classList.add('connected'); }
+    document.getElementById('btn-arduino')?.classList.add('hidden');
+    let buffer = '';
+    const decoder = new TextDecoderStream();
+    port.readable.pipeTo(decoder.writable);
+    const reader = decoder.readable.getReader();
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      for (const line of lines) applyArduinoCommand(line);
+    }
+  } catch (err) {
+    if (err.name !== 'NotFoundError') {
+      console.error('Arduino:', err);
+      alert('Kunne ikke forbinde til Arduino: ' + (err.message || err));
+    }
+  } finally {
+    serialPort = null;
+    const st = document.getElementById('arduino-status');
+    if (st) { st.textContent = ''; st.classList.remove('connected'); }
+    document.getElementById('btn-arduino')?.classList.remove('hidden');
+  }
+}
+
+function setupArduinoController() {
+  const btn = document.getElementById('btn-arduino');
+  if (btn) btn.addEventListener('click', connectArduinoController);
 }
 
 function setupButtons() {

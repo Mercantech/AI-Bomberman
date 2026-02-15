@@ -40,3 +40,7 @@ npm start
 
 - **Pil eller WASD**: Bevæg spiller
 - **Mellemrum**: Placer bombe
+
+## Arduino Oplà controller (trådløs)
+
+Arduino MKR WiFi 1010 + MKR IoT Carrier kan bruges som trådløs controller. Arduino og server kan være på forskellige maskiner/netværk. Se `iot/README.md` for opsætning.

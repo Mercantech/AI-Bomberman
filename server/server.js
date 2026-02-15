@@ -43,7 +43,7 @@ function getLobbyList() {
   return [...lobbies.entries()].map(([pin, lobby]) => ({
     pin,
     gridSize: lobby.game.gridSize,
-    playerCount: lobby.clients.size,
+    playerCount: lobby.clients.size + (lobby.controllerPlayers?.size || 0),
     spectatorCount: (lobby.spectators || new Set()).size,
     gameState: lobby.game.gameState,
     createdAt: lobby.createdAt,
@@ -92,6 +92,7 @@ function handleAdminApi(req, res) {
           game,
           clients: new Set(),
           spectators: new Set(),
+          controllerPlayers: new Map(), // playerId -> { name }
           createdAt: Date.now(),
         });
         res.writeHead(201);
@@ -121,6 +122,74 @@ function handleAdminApi(req, res) {
   res.end(JSON.stringify({ error: 'Not found' }));
 }
 
+function handleControllerApi(req, res) {
+  const parsed = new URL(req.url, `http://localhost:${PORT}`);
+  const path = parsed.pathname;
+  res.setHeader('Content-Type', 'application/json');
+
+  if (path === '/api/controller/join' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { pin, name } = JSON.parse(body || '{}');
+        const pinStr = String(pin || '').trim();
+        const lobby = lobbies.get(pinStr);
+        if (!lobby) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: 'Ugyldig eller ukendt PIN' }));
+          return;
+        }
+        const playerId = `player_${++playerIdCounter}`;
+        const displayName = name ? String(name).trim().slice(0, 20) : `Arduino ${playerIdCounter}`;
+        lobby.game.addPlayer(playerId, displayName);
+        if (!lobby.controllerPlayers) lobby.controllerPlayers = new Map();
+        lobby.controllerPlayers.set(playerId, { name: displayName });
+        broadcastToLobby(pinStr, { type: 'state', data: lobby.game.getState() });
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, playerId, name: displayName }));
+      } catch (e) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Ugyldig forespørgsel' }));
+      }
+    });
+    return;
+  }
+
+  if (path === '/api/controller/input' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { pin, playerId, action, direction } = JSON.parse(body || '{}');
+        const pinStr = String(pin || '').trim();
+        const lobby = lobbies.get(pinStr);
+        if (!lobby) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: 'Lobby ikke fundet' }));
+          return;
+        }
+        if (!lobby.controllerPlayers?.has(playerId)) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ error: 'Ugyldig controller' }));
+          return;
+        }
+        const data = action === 'move' ? { action: 'move', direction } : { action: 'bomb' };
+        handleInput(pinStr, playerId, data);
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Ugyldig forespørgsel' }));
+      }
+    });
+    return;
+  }
+
+  res.writeHead(404);
+  res.end(JSON.stringify({ error: 'Not found' }));
+}
+
 // CORS headers til alle requests
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -140,6 +209,11 @@ const server = http.createServer((req, res) => {
 
   if (req.url && req.url.startsWith('/api/admin/')) {
     handleAdminApi(req, res);
+    return;
+  }
+
+  if (req.url && req.url.startsWith('/api/controller/')) {
+    handleControllerApi(req, res);
     return;
   }
 
