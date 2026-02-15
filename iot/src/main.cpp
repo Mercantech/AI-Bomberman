@@ -17,15 +17,19 @@ MKRIoTCarrier carrier;
 // ========== KONFIGURATION – ændr til dit netværk og server ==========
 #define WIFI_SSID      "NETGEAR25"
 #define WIFI_PASS      "fuzzysocks666"
-// På tværs af netværk: brug offentligt domæne. Kun lokalt: PC'ens IP + USE_HTTPS 0, port 8080.
+// På tværs af netværk: brug altid jeres offentlige domæne (fx Cloudflare Tunnel). Samme kode virker overalt.
+// Kun lokalt på samme WiFi: kan sættes til PC'ens IP (fx 192.168.1.15) og USE_HTTPS 0, port 8080.
 #define SERVER_HOST    "bomberman.mercantec.tech"
-#define GAME_PIN       "1234"
-#define PLAYER_NAME    "Arduino"
-#define USE_HTTPS      0   // 0 = HTTP (port 80) når "Always Use HTTPS" er fra i Cloudflare. 1 = HTTPS (cert nødvendig).
+#define GAME_PIN       "1234"                       // PIN fra admin-spillet
+#define PLAYER_NAME    "Arduino"                    // Dit spillernavn
+
+// 1 = HTTPS (port 443, kræver cert-upload). 0 = HTTP (port 80) – virker når "Always Use HTTPS" er slået fra i Cloudflare.
+#define USE_HTTPS      0
+
 #if USE_HTTPS
   #define SERVER_PORT 443
 #else
-  #define SERVER_PORT 80    // 80 til offentligt domæne; 8080 ved lokalt IP
+  #define SERVER_PORT 80     // HTTP til offentligt domæne; brug 8080 kun ved lokalt IP
 #endif
 // ====================================================================
 

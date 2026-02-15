@@ -132,23 +132,31 @@ function handleControllerApi(req, res) {
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
       try {
+        console.log('[CONTROLLER JOIN] Raw body:', body);
         const { pin, name } = JSON.parse(body || '{}');
         const pinStr = String(pin || '').trim();
+        console.log('[CONTROLLER JOIN] pin=%s name=%s', pinStr, name);
+        console.log('[CONTROLLER JOIN] Lobbies:', [...lobbies.keys()]);
+
         const lobby = lobbies.get(pinStr);
         if (!lobby) {
+          console.log('[CONTROLLER JOIN] FAIL: PIN not found:', pinStr);
           res.writeHead(404);
           res.end(JSON.stringify({ error: 'Ugyldig eller ukendt PIN' }));
           return;
         }
+
         const playerId = `player_${++playerIdCounter}`;
         const displayName = name ? String(name).trim().slice(0, 20) : `Arduino ${playerIdCounter}`;
         lobby.game.addPlayer(playerId, displayName);
         if (!lobby.controllerPlayers) lobby.controllerPlayers = new Map();
         lobby.controllerPlayers.set(playerId, { name: displayName });
         broadcastToLobby(pinStr, { type: 'state', data: lobby.game.getState() });
+        console.log('[CONTROLLER JOIN] OK: playerId=%s name=%s pin=%s', playerId, displayName, pinStr);
         res.writeHead(200);
         res.end(JSON.stringify({ ok: true, playerId, name: displayName }));
       } catch (e) {
+        console.error('[CONTROLLER JOIN] Error:', e.message, e.stack);
         res.writeHead(400);
         res.end(JSON.stringify({ error: 'Ugyldig forespørgsel' }));
       }
