@@ -59,7 +59,9 @@ function trySpectate() {
 
 function connect() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${protocol}//${window.location.host}`;
+  const baseMatch = window.location.pathname.match(/^(\/Bomberman)(?=\/|$)/);
+  const basePath = baseMatch ? baseMatch[1] : '';
+  const url = `${protocol}//${window.location.host}${basePath}`;
 
   updateStatus('Forbinder...');
   showSpectateView();

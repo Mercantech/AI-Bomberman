@@ -15,8 +15,9 @@ Trådløs controller til Bomberman via MKR WiFi 1010 + MKR IoT Carrier. Arduino 
 |---------------|--------------------------------------------------|
 | `WIFI_SSID`   | Dit WiFi netværksnavn                            |
 | `WIFI_PASS`   | WiFi-adgangskode                                 |
-| `SERVER_HOST` | **På tværs af netværk:** jeres offentlige domæne (fx `bomberman.mercantec.tech`). Lokalt: PC'ens IP. |
-| `USE_HTTPS`   | 1 = HTTPS til offentligt domæne (virker overalt). 0 = kun lokalt samme net. |
+| `SERVER_HOST` | Offentligt domæne: `games.mercantec.tech`. Lokalt: PC'ens IP. |
+| `GAME_BASE_PATH` | `/Bomberman` (på games.mercantec.tech) |
+| `USE_HTTPS`   | 1 = HTTPS til offentligt domæne. 0 = kun lokalt samme net. |
 | `GAME_PIN`    | PIN fra admin-spillet                            |
 | `PLAYER_NAME` | Dit spillernavn (fx "Arduino" eller dit navn)    |
 
@@ -80,7 +81,7 @@ Projektet bruger **HTTPS** som standard (`USE_HTTPS 1`). Når serveren er bag **
 
 ### Certifikat-upload med Arduino IDE
 
-**Værktøjer** → **Upload Root Certificates** → **Add New** → indtast fx `bomberman.mercantec.tech:443` → vælg MKR WiFi 1010 → **Upload**. Luk Serial Monitor først.
+**Værktøjer** → **Upload Root Certificates** → **Add New** → indtast fx `games.mercantec.tech:443` → vælg MKR WiFi 1010 → **Upload**. Luk Serial Monitor først.
 
 ## Fejlfinding
 

@@ -1,0 +1,8 @@
+services:
+  bomberman:
+    ports:
+      - "8888:8080"
+
+networks:
+  dokploy-network:
+    external: false

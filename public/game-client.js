@@ -74,7 +74,9 @@ function tryJoin() {
 function connect() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;
-  const url = `${protocol}//${host}`;
+  const baseMatch = window.location.pathname.match(/^(\/Bomberman)(?=\/|$)/);
+  const basePath = baseMatch ? baseMatch[1] : '';
+  const url = `${protocol}//${host}${basePath}`;
 
   updateStatus('Forbinder...', false);
   showGameScreen();

@@ -1,11 +1,13 @@
 /**
  * Bomberman Controller - Arduino MKR WiFi 1010 + MKR IoT Carrier (Oplà)
  * Trådløs over WiFi – sender input til spil-server via HTTP.
- * Virker selvom Arduino og server er på forskellige netværk (server skal være tilgængelig).
  *
- * OBS: Rediger WIFI_SSID, WIFI_PASS, SERVER_HOST og GAME_PIN før upload.
+ * Fælles controller-kontrakt (samme som Wizard Duel):
+ *   POST {GAME_BASE_PATH}/api/controller/join
+ *   POST {GAME_BASE_PATH}/api/controller/heartbeat
+ *   POST {GAME_BASE_PATH}/api/controller/action
  *
- * Knap-layout: TOUCH0=Op, TOUCH1=Ned, TOUCH2=Venstre, TOUCH3=Højre, TOUCH4=Bombe
+ * Knap-layout (Nav-profil): TOUCH0=Op, TOUCH1=Ned, TOUCH2=Venstre, TOUCH3=Højre, TOUCH4=Bombe
  */
 
 #include <Arduino_MKRIoTCarrier.h>
@@ -14,18 +16,21 @@
 
 MKRIoTCarrier carrier;
 
-// ========== KONFIGURATION – ændr til dit netværk og server ==========
-#define WIFI_SSID      "NETGEAR25"
-#define WIFI_PASS      "fuzzysocks666"
-// På tværs af netværk: brug offentligt domæne. Kun lokalt: PC'ens IP + USE_HTTPS 0, port 8080.
-#define SERVER_HOST    "bomberman.mercantec.tech"
-#define GAME_PIN       "1234"
-#define PLAYER_NAME    "Arduino"
-#define USE_HTTPS      0   // 0 = HTTP (port 80) når "Always Use HTTPS" er fra i Cloudflare. 1 = HTTPS (cert nødvendig).
+// ========== KONFIGURATION – ændr til dit netværk og spil ==========
+#define WIFI_SSID       "WIFI_NAVN_HER"
+#define WIFI_PASS       "WIFI_PASSWORD_HER"
+#define SERVER_HOST     "games.mercantec.tech"
+#define GAME_BASE_PATH  "/Bomberman"   // Skift til "/Wizard" for Wizard Duel
+#define GAME_PIN        "1234"         // PIN fra admin-spillet
+#define PLAYER_NAME     "Arduino"
+
+// 1 = HTTPS (port 443). 0 = HTTP (port 80) – brug 0 kun lokalt.
+#define USE_HTTPS       1
+
 #if USE_HTTPS
   #define SERVER_PORT 443
 #else
-  #define SERVER_PORT 80    // 80 til offentligt domæne; 8080 ved lokalt IP
+  #define SERVER_PORT 80
 #endif
 // ====================================================================
 
@@ -36,9 +41,12 @@ MKRIoTCarrier carrier;
 #define BTN_BOMB  TOUCH4
 
 const unsigned long DEBOUNCE_MS = 80;
-unsigned long lastUp = 0, lastDown = 0, lastLeft = 0, lastRight = 0, lastBomb = 0;
+const unsigned long HEARTBEAT_MS = 4000;
+unsigned long lastUp = 0, lastDown = 0, lastLeft = 0, lastRight = 0, lastBomb = 0, lastHeartbeat = 0;
 
 String playerId;
+String deviceId;
+
 #if USE_HTTPS
   WiFiSSLClient wifi;
 #else
@@ -46,7 +54,11 @@ String playerId;
 #endif
 HttpClient client = HttpClient(wifi, SERVER_HOST, SERVER_PORT);
 
-#define HTTP_TIMEOUT_MS 15000  // 15 sek – undgå evig venten ved joiner
+#define HTTP_TIMEOUT_MS 15000
+
+String apiPath(const char* endpoint) {
+  return String(GAME_BASE_PATH) + endpoint;
+}
 
 void showStatus(const char* msg, uint16_t color = ST77XX_WHITE) {
   carrier.display.fillScreen(ST77XX_BLACK);
@@ -66,14 +78,16 @@ void showStatus2(const char* line1, const char* line2, uint16_t color = ST77XX_W
   carrier.display.print(line2);
 }
 
-void sendInput(const char* action, const char* direction = nullptr) {
-  if (playerId.length() == 0) return;
+void buildDeviceId() {
+  byte mac[6];
+  WiFi.macAddress(mac);
+  char buf[16];
+  sprintf(buf, "OPLA_%02X%02X%02X", mac[3], mac[4], mac[5]);
+  deviceId = String(buf);
+}
 
-  String path = "/api/controller/input";
-  String body = "{\"pin\":\"" + String(GAME_PIN) + "\",\"playerId\":\"" + playerId + "\",\"action\":\"" + String(action) + "\"";
-  if (direction) body += ",\"direction\":\"" + String(direction) + "\"";
-  body += "}";
-
+bool httpPost(const String& path, const String& body, String& responseBody) {
+  wifi.setTimeout(HTTP_TIMEOUT_MS / 1000);
   client.beginRequest();
   client.post(path);
   client.sendHeader("Content-Type", "application/json");
@@ -81,11 +95,45 @@ void sendInput(const char* action, const char* direction = nullptr) {
   client.beginBody();
   client.print(body);
   client.endRequest();
+
+  int status = client.responseStatusCode();
+  responseBody = client.responseBody();
+  return status == 200;
+}
+
+void sendAction(const char* action, const char* direction = nullptr) {
+  if (playerId.length() == 0) return;
+
+  String path = apiPath("/api/controller/action");
+  String body = "{\"pin\":\"" + String(GAME_PIN) +
+                "\",\"playerId\":\"" + playerId +
+                "\",\"deviceId\":\"" + deviceId +
+                "\",\"action\":\"" + String(action) + "\"";
+  if (direction) {
+    body += ",\"params\":{\"direction\":\"" + String(direction) + "\"}";
+    body += ",\"direction\":\"" + String(direction) + "\"";
+  }
+  body += "}";
+
+  String resp;
+  httpPost(path, body, resp);
+}
+
+void sendHeartbeat() {
+  if (playerId.length() == 0) return;
+  String path = apiPath("/api/controller/heartbeat");
+  String body = "{\"pin\":\"" + String(GAME_PIN) +
+                "\",\"playerId\":\"" + playerId +
+                "\",\"deviceId\":\"" + deviceId + "\"}";
+  String resp;
+  httpPost(path, body, resp);
 }
 
 bool doJoin() {
-  String path = "/api/controller/join";
-  String body = "{\"pin\":\"" + String(GAME_PIN) + "\",\"name\":\"" + String(PLAYER_NAME) + "\"}";
+  String path = apiPath("/api/controller/join");
+  String body = "{\"pin\":\"" + String(GAME_PIN) +
+                "\",\"name\":\"" + String(PLAYER_NAME) +
+                "\",\"deviceId\":\"" + deviceId + "\"}";
 
   Serial.println("========== JOIN REQUEST ==========");
   Serial.print("[JOIN] Host: ");
@@ -96,38 +144,13 @@ bool doJoin() {
   Serial.println(path);
   Serial.print("[JOIN] Body: ");
   Serial.println(body);
-  Serial.println("[JOIN] Sending HTTP POST...");
 
-  unsigned long t0 = millis();
-  wifi.setTimeout(HTTP_TIMEOUT_MS / 1000);
-
-  client.beginRequest();
-  client.post(path);
-  client.sendHeader("Content-Type", "application/json");
-  client.sendHeader("Content-Length", body.length());
-  client.beginBody();
-  client.print(body);
-  client.endRequest();
-
-  Serial.print("[JOIN] Waiting for responseStatusCode()... (timeout ");
-  Serial.print(HTTP_TIMEOUT_MS / 1000);
-  Serial.println("s)");
-
-  int status = client.responseStatusCode();
-
-  unsigned long elapsed = millis() - t0;
-  Serial.print("[JOIN] Got status code: ");
-  Serial.print(status);
-  Serial.print(" (took ");
-  Serial.print(elapsed);
-  Serial.println(" ms)");
-
-  String resp = client.responseBody();
-  Serial.print("[JOIN] Response body: ");
+  String resp;
+  bool ok = httpPost(path, body, resp);
+  Serial.print("[JOIN] Response: ");
   Serial.println(resp);
-  Serial.println("================================");
 
-  if (status == 200 && resp.indexOf("\"playerId\"") >= 0) {
+  if (ok && resp.indexOf("\"playerId\"") >= 0) {
     int start = resp.indexOf("\"playerId\":\"") + 12;
     int end = resp.indexOf("\"", start);
     playerId = resp.substring(start, end);
@@ -135,70 +158,47 @@ bool doJoin() {
     Serial.println(playerId);
     return true;
   }
-
-  Serial.print("[JOIN] FAILED: status=");
-  Serial.print(status);
-  Serial.print(" hasPlayerId=");
-  Serial.println(resp.indexOf("\"playerId\"") >= 0 ? "yes" : "no");
   return false;
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(500);  // Lad Serial stabilisere
+  delay(500);
   Serial.println("\n\n========== BOMBERMAN CONTROLLER START ==========");
-  Serial.println("[INIT] Serial OK (115200)");
 
   carrier.noCase();
   carrier.begin();
-  Serial.println("[INIT] Carrier/display OK");
 
   showStatus("Tilslutter WiFi...", ST77XX_YELLOW);
-  Serial.print("[WIFI] Connecting to ");
-  Serial.print(WIFI_SSID);
-  Serial.println("...");
-
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   int w = 0;
   while (WiFi.status() != WL_CONNECTED && w < 20) {
     delay(500);
     w++;
-    Serial.print("[WIFI] Attempt ");
-    Serial.print(w);
-    Serial.print("/20, status=");
-    Serial.println(WiFi.status());
   }
 
   if (WiFi.status() != WL_CONNECTED) {
     showStatus2("WiFi fejl", "Tjek SSID/password", ST77XX_RED);
-    Serial.println("[WIFI] FAILED - not connected!");
-    Serial.print("[WIFI] Final status=");
-    Serial.println(WiFi.status());
     return;
   }
 
-  Serial.println("[WIFI] Connected!");
-  Serial.print("[WIFI] IP: ");
-  Serial.println(WiFi.localIP());
-  Serial.print("[WIFI] Signal: ");
-  Serial.print(WiFi.RSSI());
-  Serial.println(" dBm");
+  buildDeviceId();
+  Serial.print("[ID] deviceId=");
+  Serial.println(deviceId);
 
   {
     String line2 = "PIN: " + String(GAME_PIN);
     showStatus2("Joiner spil...", line2.c_str(), ST77XX_YELLOW);
   }
-  Serial.println("[JOIN] About to join game...");
   delay(500);
 
   if (!doJoin()) {
     showStatus2("Join fejl!", "Tjek PIN + server", ST77XX_RED);
-    Serial.println("[SETUP] Join failed - controller stopped");
     return;
   }
 
   showStatus("Klar! Spil!", ST77XX_GREEN);
-  Serial.println("[SETUP] SUCCESS - controller ready!");
+  lastHeartbeat = millis();
 }
 
 void loop() {
@@ -207,35 +207,38 @@ void loop() {
     return;
   }
 
-  carrier.Buttons.update();
   unsigned long now = millis();
+  if (now - lastHeartbeat > HEARTBEAT_MS) {
+    sendHeartbeat();
+    lastHeartbeat = now;
+  }
 
-  // Hold knap = gentag bevægelse (som tastatur)
+  carrier.Buttons.update();
+
   if (carrier.Buttons.getTouch(BTN_UP)) {
-    if (now - lastUp > DEBOUNCE_MS) { sendInput("move", "UP"); lastUp = now; }
+    if (now - lastUp > DEBOUNCE_MS) { sendAction("move", "UP"); lastUp = now; }
   }
   if (carrier.Buttons.getTouch(BTN_DOWN)) {
-    if (now - lastDown > DEBOUNCE_MS) { sendInput("move", "DOWN"); lastDown = now; }
+    if (now - lastDown > DEBOUNCE_MS) { sendAction("move", "DOWN"); lastDown = now; }
   }
   if (carrier.Buttons.getTouch(BTN_LEFT)) {
-    if (now - lastLeft > DEBOUNCE_MS) { sendInput("move", "LEFT"); lastLeft = now; }
+    if (now - lastLeft > DEBOUNCE_MS) { sendAction("move", "LEFT"); lastLeft = now; }
   }
   if (carrier.Buttons.getTouch(BTN_RIGHT)) {
-    if (now - lastRight > DEBOUNCE_MS) { sendInput("move", "RIGHT"); lastRight = now; }
+    if (now - lastRight > DEBOUNCE_MS) { sendAction("move", "RIGHT"); lastRight = now; }
   }
 
   if (carrier.Buttons.onTouchDown(BTN_BOMB) && now - lastBomb > DEBOUNCE_MS) {
-    sendInput("bomb");
+    sendAction("bomb");
     lastBomb = now;
   }
 
-  // Gesture som backup
   if (carrier.Light.gestureAvailable()) {
     uint8_t g = carrier.Light.readGesture();
-    if (g == UP)   sendInput("move", "UP");
-    if (g == DOWN) sendInput("move", "DOWN");
-    if (g == LEFT) sendInput("move", "LEFT");
-    if (g == RIGHT) sendInput("move", "RIGHT");
+    if (g == UP)   sendAction("move", "UP");
+    if (g == DOWN) sendAction("move", "DOWN");
+    if (g == LEFT) sendAction("move", "LEFT");
+    if (g == RIGHT) sendAction("move", "RIGHT");
   }
 
   delay(20);

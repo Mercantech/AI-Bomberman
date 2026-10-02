@@ -2,7 +2,9 @@
 
 Klassisk Bomberman multiplayer spil med WebSockets.
 
-**Live:** [https://bomberman.mercantec.tech/](https://bomberman.mercantec.tech/)
+**Live:** [https://games.mercantec.tech/Bomberman](https://games.mercantec.tech/Bomberman)
+
+Portal: [https://games.mercantec.tech/](https://games.mercantec.tech/)
 
 ## Arkitektur
 

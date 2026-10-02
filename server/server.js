@@ -122,6 +122,29 @@ function handleAdminApi(req, res) {
   res.end(JSON.stringify({ error: 'Not found' }));
 }
 
+function applyControllerInput(pinStr, playerId, action, direction, params) {
+  const lobby = lobbies.get(pinStr);
+  if (!lobby) return { status: 404, body: { ok: false, error: 'Lobby ikke fundet' } };
+  if (!lobby.controllerPlayers?.has(playerId)) {
+    return { status: 403, body: { ok: false, error: 'Ugyldig controller' } };
+  }
+
+  const resolvedAction = action || params?.action;
+  const resolvedDirection = direction || params?.direction;
+
+  let data;
+  if (resolvedAction === 'move') {
+    data = { action: 'move', direction: resolvedDirection };
+  } else if (resolvedAction === 'bomb') {
+    data = { action: 'bomb' };
+  } else {
+    return { status: 400, body: { ok: false, error: 'Ukendt action' } };
+  }
+
+  handleInput(pinStr, playerId, data);
+  return { status: 200, body: { ok: true } };
+}
+
 function handleControllerApi(req, res) {
   const parsed = new URL(req.url, `http://localhost:${PORT}`);
   const path = parsed.pathname;
@@ -133,16 +156,16 @@ function handleControllerApi(req, res) {
     req.on('end', () => {
       try {
         console.log('[CONTROLLER JOIN] Raw body:', body);
-        const { pin, name } = JSON.parse(body || '{}');
+        const { pin, name, deviceId } = JSON.parse(body || '{}');
         const pinStr = String(pin || '').trim();
-        console.log('[CONTROLLER JOIN] pin=%s name=%s', pinStr, name);
+        console.log('[CONTROLLER JOIN] pin=%s name=%s deviceId=%s', pinStr, name, deviceId);
         console.log('[CONTROLLER JOIN] Lobbies:', [...lobbies.keys()]);
 
         const lobby = lobbies.get(pinStr);
         if (!lobby) {
           console.log('[CONTROLLER JOIN] FAIL: PIN not found:', pinStr);
           res.writeHead(404);
-          res.end(JSON.stringify({ error: 'Ugyldig eller ukendt PIN' }));
+          res.end(JSON.stringify({ ok: false, error: 'Ugyldig eller ukendt PIN' }));
           return;
         }
 
@@ -150,7 +173,10 @@ function handleControllerApi(req, res) {
         const displayName = name ? String(name).trim().slice(0, 20) : `Arduino ${playerIdCounter}`;
         lobby.game.addPlayer(playerId, displayName);
         if (!lobby.controllerPlayers) lobby.controllerPlayers = new Map();
-        lobby.controllerPlayers.set(playerId, { name: displayName });
+        lobby.controllerPlayers.set(playerId, {
+          name: displayName,
+          deviceId: deviceId ? String(deviceId).trim().slice(0, 40) : null,
+        });
         broadcastToLobby(pinStr, { type: 'state', data: lobby.game.getState() });
         console.log('[CONTROLLER JOIN] OK: playerId=%s name=%s pin=%s', playerId, displayName, pinStr);
         res.writeHead(200);
@@ -158,44 +184,62 @@ function handleControllerApi(req, res) {
       } catch (e) {
         console.error('[CONTROLLER JOIN] Error:', e.message, e.stack);
         res.writeHead(400);
-        res.end(JSON.stringify({ error: 'Ugyldig forespørgsel' }));
+        res.end(JSON.stringify({ ok: false, error: 'Ugyldig forespørgsel' }));
       }
     });
     return;
   }
 
-  if (path === '/api/controller/input' && req.method === 'POST') {
+  // Keepalive for fælles Arduino-kontrakt (Bomberman behøver ikke state på device)
+  if (path === '/api/controller/heartbeat' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
       try {
-        const { pin, playerId, action, direction } = JSON.parse(body || '{}');
+        const { pin, playerId } = JSON.parse(body || '{}');
         const pinStr = String(pin || '').trim();
         const lobby = lobbies.get(pinStr);
         if (!lobby) {
           res.writeHead(404);
-          res.end(JSON.stringify({ error: 'Lobby ikke fundet' }));
+          res.end(JSON.stringify({ ok: false, error: 'Lobby ikke fundet' }));
           return;
         }
-        if (!lobby.controllerPlayers?.has(playerId)) {
+        if (playerId && !lobby.controllerPlayers?.has(playerId)) {
           res.writeHead(403);
-          res.end(JSON.stringify({ error: 'Ugyldig controller' }));
+          res.end(JSON.stringify({ ok: false, error: 'Ugyldig controller' }));
           return;
         }
-        const data = action === 'move' ? { action: 'move', direction } : { action: 'bomb' };
-        handleInput(pinStr, playerId, data);
         res.writeHead(200);
         res.end(JSON.stringify({ ok: true }));
       } catch (e) {
         res.writeHead(400);
-        res.end(JSON.stringify({ error: 'Ugyldig forespørgsel' }));
+        res.end(JSON.stringify({ ok: false, error: 'Ugyldig forespørgsel' }));
+      }
+    });
+    return;
+  }
+
+  // Fælles action-envelope (+ bagudkompatibel /input)
+  if ((path === '/api/controller/action' || path === '/api/controller/input') && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { pin, playerId, action, direction, params } = JSON.parse(body || '{}');
+        const pinStr = String(pin || '').trim();
+        const result = applyControllerInput(pinStr, playerId, action, direction, params);
+        res.writeHead(result.status);
+        res.end(JSON.stringify(result.body));
+      } catch (e) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: 'Ugyldig forespørgsel' }));
       }
     });
     return;
   }
 
   res.writeHead(404);
-  res.end(JSON.stringify({ error: 'Not found' }));
+  res.end(JSON.stringify({ ok: false, error: 'Not found' }));
 }
 
 // CORS headers til alle requests

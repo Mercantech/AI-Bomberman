@@ -2,7 +2,12 @@
  * Bomberman Admin - Opret spil, se aktive, afslut sessioner
  */
 
-const API_BASE = '';
+function getBasePath() {
+  const match = window.location.pathname.match(/^(\/Bomberman)(?=\/|$)/);
+  return match ? match[1] : '';
+}
+
+const API_BASE = getBasePath();
 
 async function createLobby(pin, gridSize) {
   const res = await fetch(`${API_BASE}/api/admin/lobbies`, {
@@ -79,8 +84,8 @@ async function refreshLobbies() {
           <span>Status: ${lobby.gameState === 'playing' ? 'I gang' : lobby.gameState === 'ended' ? 'Slut' : 'Venter'}</span>
         </div>
         <div class="lobby-actions">
-          <a href="/?pin=${lobby.pin}" target="_blank" class="btn-join-link">Deltag</a>
-          <a href="/spectate.html?pin=${lobby.pin}" target="_blank" class="btn-spectate-link">Spectate</a>
+          <a href="${API_BASE}/?pin=${lobby.pin}" target="_blank" class="btn-join-link">Deltag</a>
+          <a href="${API_BASE}/spectate.html?pin=${lobby.pin}" target="_blank" class="btn-spectate-link">Spectate</a>
           <button data-pin="${lobby.pin}" class="btn-end">Afslut</button>
         </div>
       `;
