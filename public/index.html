@@ -4,6 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bomberman - Multiplayer</title>
+  <!-- Under /Bomberman uden trailing slash resolver relative CSS til /style.css — ret base først -->
+  <script>
+    (function () {
+      var m = location.pathname.match(/^(\/Bomberman)(?=\/|$)/);
+      if (!m) return;
+      var base = document.createElement('base');
+      base.href = m[1] + '/';
+      document.currentScript.after(base);
+      if (location.pathname === m[1]) {
+        location.replace(m[1] + '/' + location.search + location.hash);
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
