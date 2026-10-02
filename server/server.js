@@ -269,8 +269,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  let filePath = req.url === '/' ? '/index.html' : req.url;
-  filePath = path.join(__dirname, '..', 'public', filePath.split('?')[0]);
+  let rawUrl = req.url || '/';
+  const q = rawUrl.indexOf('?');
+  if (q !== -1) rawUrl = rawUrl.slice(0, q);
+  let filePath = rawUrl === '/' || rawUrl === '' ? '/index.html' : rawUrl;
+  filePath = path.join(__dirname, '..', 'public', filePath);
 
   const ext = path.extname(filePath);
   const contentTypes = {
@@ -291,7 +294,13 @@ const server = http.createServer((req, res) => {
       }
       return;
     }
-    res.writeHead(200, { 'Content-Type': contentTypes[ext] || 'text/plain' });
+    const headers = { 'Content-Type': contentTypes[ext] || 'text/plain' };
+    if (ext === '.html') {
+      headers['Cache-Control'] = 'no-cache';
+    } else if (ext === '.css' || ext === '.js') {
+      headers['Cache-Control'] = 'public, max-age=60';
+    }
+    res.writeHead(200, headers);
     res.end(data);
   });
 });
