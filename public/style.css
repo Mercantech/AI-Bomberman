@@ -14,20 +14,29 @@ body {
   color: #eee;
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+#app,
+#admin-app,
+#spectate-app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
-}
-
-#app {
   text-align: center;
   padding: 20px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-header {
+#app header {
   margin-bottom: 20px;
 }
 
-header h1 {
+#app header h1 {
   font-size: 2.5rem;
   margin-bottom: 10px;
   text-shadow: 0 0 20px rgba(255, 200, 100, 0.5);
