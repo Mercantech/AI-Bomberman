@@ -4,15 +4,6 @@ services:
     restart: unless-stopped
     networks:
       - dokploy-network
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=dokploy-network
-      - traefik.http.routers.bomberman.rule=Host(`games.mercantec.tech`) && PathPrefix(`/Bomberman`)
-      - traefik.http.routers.bomberman.entrypoints=web
-      - traefik.http.routers.bomberman.priority=100
-      - traefik.http.routers.bomberman.middlewares=bomberman-strip
-      - traefik.http.middlewares.bomberman-strip.stripprefix.prefixes=/Bomberman
-      - traefik.http.services.bomberman.loadbalancer.server.port=8080
 
 networks:
   dokploy-network:
