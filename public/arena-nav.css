@@ -68,7 +68,12 @@
 .arena-nav-links a.active {
   background: #e71e28;
   color: #fff !important;
-  box-shadow: inset -2px -2px 0 #9b1218, inset 2px 2px 0 #ff6b6b;
+  border-color: #fff;
+  box-shadow: inset -2px -2px 0 #9b1218, inset 2px 2px 0 #ff6b6b, 0 0 0 2px #000;
+}
+
+.arena-nav-links a.active::before {
+  content: '► ';
 }
 
 @media (max-width: 560px) {
