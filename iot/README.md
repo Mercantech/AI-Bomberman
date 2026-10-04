@@ -1,5 +1,9 @@
 # Bomberman Arduino Oplà Controller (trådløs)
 
+> **Opdateret starter-kit:** Brug den fælles controller i Mercantec Games-repoet:  
+> [github.com/Mercantech/Games/tree/main/arduino/MercantecGamesController](https://github.com/Mercantech/Games/tree/main/arduino/MercantecGamesController)  
+> (`config.h` + `GAME_MODE_BOMBERMAN`, WiFi-genforbindelse og TFT-fejltekster). Denne `iot/`-mappe beholdes som reference.
+
 Trådløs controller til Bomberman via MKR WiFi 1010 + MKR IoT Carrier. Arduino og server kan være på forskellige maskiner og netværk – Arduino forbinder til WiFi og sender input til serveren via HTTP.
 
 ## Hardware
