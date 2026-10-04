@@ -269,6 +269,14 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  const healthPath = (req.url || '').split('?')[0];
+  if (healthPath === '/api/health' && req.method === 'GET') {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, service: 'bomberman' }));
+    return;
+  }
+
   let rawUrl = req.url || '/';
   const q = rawUrl.indexOf('?');
   if (q !== -1) rawUrl = rawUrl.slice(0, q);
