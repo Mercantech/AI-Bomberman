@@ -1,7 +1,10 @@
 services:
   bomberman:
     ports:
-      - "8888:8080"
+      - '8888:8080'
+    environment:
+      MQTT_ENABLED: ${MQTT_ENABLED:-1}
+      MQTT_URL: ${MQTT_URL:-mqtt://host.docker.internal:1883}
 
 networks:
   dokploy-network:

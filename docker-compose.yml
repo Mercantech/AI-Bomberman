@@ -2,6 +2,12 @@ services:
   bomberman:
     build: .
     restart: unless-stopped
+    environment:
+      MQTT_ENABLED: ${MQTT_ENABLED:-0}
+      MQTT_URL: ${MQTT_URL:-mqtt://games-mqtt:1883}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-mercantec/bomberman/v1}
     networks:
       - dokploy-network
 

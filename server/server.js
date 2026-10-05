@@ -1,6 +1,6 @@
 /**
  * Bomberman WebSocket Server
- * Multi-lobby system med PIN, admin API
+ * Multi-lobby system med PIN, admin API, valgfri MQTT-bridge til Oplà
  */
 
 const WebSocket = require('ws');
@@ -10,16 +10,19 @@ const fs = require('fs');
 const { URL } = require('url');
 
 const { BombermanGame } = require('./game');
+const { createControllerService } = require('./controller-service');
+const { startMqttBridge } = require('./mqtt-bridge');
 
 const PORT = process.env.PORT || 8080;
 
-// Lobbies: PIN -> { game, clients: Set<ws>, createdAt }
 const lobbies = new Map();
-
-// Klienter uden lobby (venter på join)
 const pendingClients = new Map();
 
 let playerIdCounter = 0;
+
+function allocatePlayerId() {
+  return `player_${++playerIdCounter}`;
+}
 
 function generatePin() {
   return String(Math.floor(1000 + Math.random() * 9000));
@@ -35,9 +38,44 @@ function broadcastToLobby(pin, message) {
   const lobby = lobbies.get(pin);
   if (!lobby) return;
   const msg = typeof message === 'string' ? message : JSON.stringify(message);
-  lobby.clients.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(msg); });
-  if (lobby.spectators) lobby.spectators.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(msg); });
+  lobby.clients.forEach((ws) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+  });
+  if (lobby.spectators) {
+    lobby.spectators.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    });
+  }
 }
+
+function handleInput(pin, playerId, input) {
+  const lobby = lobbies.get(pin);
+  if (!lobby) return;
+  const game = lobby.game;
+  if (game.gameState !== 'playing') return;
+
+  switch (input.action) {
+    case 'move':
+      if (game.movePlayer(playerId, input.direction)) {
+        broadcastToLobby(pin, { type: 'state', data: game.getState() });
+      }
+      break;
+    case 'bomb':
+      if (game.placeBomb(playerId)) {
+        broadcastToLobby(pin, { type: 'state', data: game.getState() });
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+const controller = createControllerService({
+  lobbies,
+  allocatePlayerId,
+  broadcastToLobby,
+  applyGameInput: handleInput,
+});
 
 function getLobbyList() {
   return [...lobbies.entries()].map(([pin, lobby]) => ({
@@ -56,28 +94,35 @@ function endLobby(pin) {
   if (lobby.game.tickInterval) {
     clearInterval(lobby.game.tickInterval);
   }
-  lobby.clients.forEach(ws => { sendTo(ws, 'lobbyEnded', { pin }); });
-  if (lobby.spectators) lobby.spectators.forEach(ws => { sendTo(ws, 'lobbyEnded', { pin }); });
+  lobby.clients.forEach((ws) => {
+    sendTo(ws, 'lobbyEnded', { pin });
+  });
+  if (lobby.spectators) {
+    lobby.spectators.forEach((ws) => {
+      sendTo(ws, 'lobbyEnded', { pin });
+    });
+  }
   lobbies.delete(pin);
   return true;
 }
 
-// Admin API
 function handleAdminApi(req, res) {
   const parsed = new URL(req.url, `http://localhost:${PORT}`);
-  const path = parsed.pathname;
+  const pathname = parsed.pathname;
 
   res.setHeader('Content-Type', 'application/json');
 
-  if (path === '/api/admin/lobbies' && req.method === 'GET') {
+  if (pathname === '/api/admin/lobbies' && req.method === 'GET') {
     res.writeHead(200);
     res.end(JSON.stringify({ lobbies: getLobbyList() }));
     return;
   }
 
-  if (path === '/api/admin/lobbies' && req.method === 'POST') {
+  if (pathname === '/api/admin/lobbies' && req.method === 'POST') {
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
     req.on('end', () => {
       try {
         const { pin: reqPin, gridSize = 13 } = JSON.parse(body || '{}');
@@ -92,7 +137,8 @@ function handleAdminApi(req, res) {
           game,
           clients: new Set(),
           spectators: new Set(),
-          controllerPlayers: new Map(), // playerId -> { name }
+          controllerPlayers: new Map(),
+          controllerDevices: new Map(),
           createdAt: Date.now(),
         });
         res.writeHead(201);
@@ -105,7 +151,7 @@ function handleAdminApi(req, res) {
     return;
   }
 
-  const endMatch = path.match(/^\/api\/admin\/lobbies\/([^/]+)\/end$/);
+  const endMatch = pathname.match(/^\/api\/admin\/lobbies\/([^/]+)\/end$/);
   if (endMatch && req.method === 'POST') {
     const pin = endMatch[1];
     if (endLobby(pin)) {
@@ -122,65 +168,24 @@ function handleAdminApi(req, res) {
   res.end(JSON.stringify({ error: 'Not found' }));
 }
 
-function applyControllerInput(pinStr, playerId, action, direction, params) {
-  const lobby = lobbies.get(pinStr);
-  if (!lobby) return { status: 404, body: { ok: false, error: 'Lobby ikke fundet' } };
-  if (!lobby.controllerPlayers?.has(playerId)) {
-    return { status: 403, body: { ok: false, error: 'Ugyldig controller' } };
-  }
-
-  const resolvedAction = action || params?.action;
-  const resolvedDirection = direction || params?.direction;
-
-  let data;
-  if (resolvedAction === 'move') {
-    data = { action: 'move', direction: resolvedDirection };
-  } else if (resolvedAction === 'bomb') {
-    data = { action: 'bomb' };
-  } else {
-    return { status: 400, body: { ok: false, error: 'Ukendt action' } };
-  }
-
-  handleInput(pinStr, playerId, data);
-  return { status: 200, body: { ok: true } };
-}
-
 function handleControllerApi(req, res) {
   const parsed = new URL(req.url, `http://localhost:${PORT}`);
-  const path = parsed.pathname;
+  const pathname = parsed.pathname;
   res.setHeader('Content-Type', 'application/json');
 
-  if (path === '/api/controller/join' && req.method === 'POST') {
+  if (pathname === '/api/controller/join' && req.method === 'POST') {
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
     req.on('end', () => {
       try {
         console.log('[CONTROLLER JOIN] Raw body:', body);
         const { pin, name, deviceId } = JSON.parse(body || '{}');
         const pinStr = String(pin || '').trim();
-        console.log('[CONTROLLER JOIN] pin=%s name=%s deviceId=%s', pinStr, name, deviceId);
-        console.log('[CONTROLLER JOIN] Lobbies:', [...lobbies.keys()]);
-
-        const lobby = lobbies.get(pinStr);
-        if (!lobby) {
-          console.log('[CONTROLLER JOIN] FAIL: PIN not found:', pinStr);
-          res.writeHead(404);
-          res.end(JSON.stringify({ ok: false, error: 'Ugyldig eller ukendt PIN' }));
-          return;
-        }
-
-        const playerId = `player_${++playerIdCounter}`;
-        const displayName = name ? String(name).trim().slice(0, 20) : `Arduino ${playerIdCounter}`;
-        lobby.game.addPlayer(playerId, displayName);
-        if (!lobby.controllerPlayers) lobby.controllerPlayers = new Map();
-        lobby.controllerPlayers.set(playerId, {
-          name: displayName,
-          deviceId: deviceId ? String(deviceId).trim().slice(0, 40) : null,
-        });
-        broadcastToLobby(pinStr, { type: 'state', data: lobby.game.getState() });
-        console.log('[CONTROLLER JOIN] OK: playerId=%s name=%s pin=%s', playerId, displayName, pinStr);
-        res.writeHead(200);
-        res.end(JSON.stringify({ ok: true, playerId, name: displayName }));
+        const result = controller.controllerJoin(pinStr, { name, deviceId });
+        res.writeHead(result.status);
+        res.end(JSON.stringify(result.body));
       } catch (e) {
         console.error('[CONTROLLER JOIN] Error:', e.message, e.stack);
         res.writeHead(400);
@@ -190,27 +195,18 @@ function handleControllerApi(req, res) {
     return;
   }
 
-  // Keepalive for fælles Arduino-kontrakt (Bomberman behøver ikke state på device)
-  if (path === '/api/controller/heartbeat' && req.method === 'POST') {
+  if (pathname === '/api/controller/heartbeat' && req.method === 'POST') {
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
     req.on('end', () => {
       try {
         const { pin, playerId } = JSON.parse(body || '{}');
         const pinStr = String(pin || '').trim();
-        const lobby = lobbies.get(pinStr);
-        if (!lobby) {
-          res.writeHead(404);
-          res.end(JSON.stringify({ ok: false, error: 'Lobby ikke fundet' }));
-          return;
-        }
-        if (playerId && !lobby.controllerPlayers?.has(playerId)) {
-          res.writeHead(403);
-          res.end(JSON.stringify({ ok: false, error: 'Ugyldig controller' }));
-          return;
-        }
-        res.writeHead(200);
-        res.end(JSON.stringify({ ok: true }));
+        const result = controller.controllerHeartbeat(pinStr, playerId);
+        res.writeHead(result.status);
+        res.end(JSON.stringify(result.body));
       } catch (e) {
         res.writeHead(400);
         res.end(JSON.stringify({ ok: false, error: 'Ugyldig forespørgsel' }));
@@ -219,15 +215,23 @@ function handleControllerApi(req, res) {
     return;
   }
 
-  // Fælles action-envelope (+ bagudkompatibel /input)
-  if ((path === '/api/controller/action' || path === '/api/controller/input') && req.method === 'POST') {
+  if (
+    (pathname === '/api/controller/action' || pathname === '/api/controller/input') &&
+    req.method === 'POST'
+  ) {
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
     req.on('end', () => {
       try {
         const { pin, playerId, action, direction, params } = JSON.parse(body || '{}');
         const pinStr = String(pin || '').trim();
-        const result = applyControllerInput(pinStr, playerId, action, direction, params);
+        const result = controller.controllerAction(pinStr, playerId, {
+          action,
+          direction,
+          params,
+        });
         res.writeHead(result.status);
         res.end(JSON.stringify(result.body));
       } catch (e) {
@@ -242,14 +246,12 @@ function handleControllerApi(req, res) {
   res.end(JSON.stringify({ ok: false, error: 'Not found' }));
 }
 
-// CORS headers til alle requests
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-// HTTP server - admin API først, derefter statiske filer
 const server = http.createServer((req, res) => {
   setCorsHeaders(res);
 
@@ -273,7 +275,13 @@ const server = http.createServer((req, res) => {
   if (healthPath === '/api/health' && req.method === 'GET') {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
-    res.end(JSON.stringify({ ok: true, service: 'bomberman' }));
+    res.end(
+      JSON.stringify({
+        ok: true,
+        service: 'bomberman',
+        mqtt: process.env.MQTT_ENABLED === '1' || process.env.MQTT_ENABLED === 'true',
+      })
+    );
     return;
   }
 
@@ -313,13 +321,9 @@ const server = http.createServer((req, res) => {
   });
 });
 
-// WebSocket server med CORS (tillader alle origins)
-const wss = new WebSocket.Server({ 
+const wss = new WebSocket.Server({
   server,
-  verifyClient: (info) => {
-    // Tillad alle origins for WebSocket
-    return true;
-  }
+  verifyClient: () => true,
 });
 
 wss.on('connection', (ws) => {
@@ -331,7 +335,6 @@ wss.on('connection', (ws) => {
       const msg = JSON.parse(raw.toString());
 
       if (!ws.lobbyPin) {
-        // Klient skal først sende join med PIN
         if (msg.type === 'join' && msg.pin) {
           const pin = String(msg.pin).trim();
           const lobby = lobbies.get(pin);
@@ -339,7 +342,7 @@ wss.on('connection', (ws) => {
             sendTo(ws, 'error', { message: 'Ugyldig eller ukendt PIN' });
             return;
           }
-          const playerId = `player_${++playerIdCounter}`;
+          const playerId = allocatePlayerId();
           ws.playerId = playerId;
           ws.lobbyPin = pin;
           ws.isSpectator = false;
@@ -430,29 +433,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-function handleInput(pin, playerId, input) {
-  const lobby = lobbies.get(pin);
-  if (!lobby) return;
-  const game = lobby.game;
-  if (game.gameState !== 'playing') return;
-
-  switch (input.action) {
-    case 'move':
-      if (game.movePlayer(playerId, input.direction)) {
-        broadcastToLobby(pin, { type: 'state', data: game.getState() });
-      }
-      break;
-    case 'bomb':
-      if (game.placeBomb(playerId)) {
-        broadcastToLobby(pin, { type: 'state', data: game.getState() });
-      }
-      break;
-    default:
-      break;
-  }
-}
-
-// Broadcast state til aktive spil (inkl. ended, så klienter får slut-tilstanden)
 setInterval(() => {
   for (const [pin, lobby] of lobbies) {
     const hasClients = lobby.clients.size > 0 || (lobby.spectators && lobby.spectators.size > 0);
@@ -462,6 +442,8 @@ setInterval(() => {
     }
   }
 }, 50);
+
+startMqttBridge(controller);
 
 server.listen(PORT, () => {
   console.log(`Bomberman server: http://localhost:${PORT}`);
