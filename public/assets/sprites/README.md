@@ -1,3 +1,5 @@
-Sprites tegnes procedurally i `public/render.js` (pixel-atlas ved runtime).
+# Sprites
 
-Se `public/assets/ATTRIBUTION.md` for stil og CC0-referencer.
+`bombman/` — CC0 pack from OpenGameArt (Drummyfish “Bombman 2D Resources”).
+
+See [`../ATTRIBUTION.md`](../ATTRIBUTION.md).

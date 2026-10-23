@@ -20,6 +20,9 @@ let prevPowerups = 0;
 let countdownActive = false;
 let lastGameState = null;
 let intentionalLeave = false;
+let stateReceivedAt = 0;
+let lastStatsKey = '';
+let lastWaitingKey = '';
 
 function apiBase() {
   const m = window.location.pathname.match(/^(\/Bomberman)(?=\/|$)/);
@@ -304,6 +307,7 @@ function connect() {
 function applyState(next) {
   const prev = state;
   state = next;
+  stateReceivedAt = performance.now();
   detectSfx(prev, next);
 
   if (next.gameState === 'waiting') {
@@ -317,6 +321,20 @@ function applyState(next) {
     updateGameChrome();
   }
   lastGameState = next.gameState;
+}
+
+/** Client-side bomb fuse prediction for smooth pulse between snapshots. */
+function renderState(now) {
+  if (!state) return null;
+  if (state.gameState !== 'playing' || !state.bombs?.length) return state;
+  const elapsed = now - stateReceivedAt;
+  return {
+    ...state,
+    bombs: state.bombs.map((b) => ({
+      ...b,
+      timer: Math.max(0, (b.timer || 0) - elapsed),
+    })),
+  };
 }
 
 function detectSfx(prev, next) {
@@ -386,6 +404,15 @@ function updateStatus(text, connected) {
 
 function updateWaitingRoom() {
   if (!state) return;
+  const key = (state.players || [])
+    .map((p) => `${p.id}:${p.ready}:${p.name}`)
+    .join('|') + `:${state.gridSize}:${state.hostId}`;
+  if (key === lastWaitingKey) {
+    if (miniCtx && miniCanvas) Render.drawMiniMap(miniCtx, miniCanvas, state);
+    return;
+  }
+  lastWaitingKey = key;
+
   document.getElementById('waiting-pin').textContent = currentPin || '----';
   document.getElementById('waiting-grid-info').textContent = `${state.gridSize}×${state.gridSize} · classic maze`;
   const me = state.players?.find((p) => p.id === playerId);
@@ -455,6 +482,11 @@ function updateOverlay() {
 function updateStats() {
   const panel = document.getElementById('stats-panel');
   if (!panel || !state?.players?.length) return;
+  const key = state.players
+    .map((p) => `${p.id}:${p.alive}:${p.bombs}:${p.maxBombs}:${p.flameLength}:${p.speed}:${p.kills}`)
+    .join('|');
+  if (key === lastStatsKey) return;
+  lastStatsKey = key;
   panel.innerHTML = state.players
     .map((p) => {
       const isMe = p.id === playerId;
@@ -626,15 +658,12 @@ function handleInput() {
 }
 setInterval(handleInput, 50);
 
-function renderLoop() {
-  const now = Date.now();
+function renderLoop(now) {
+  now = now || performance.now();
   if (state && canvas && ctx && (state.gameState === 'playing' || state.gameState === 'ended')) {
-    Render.drawFrame(ctx, canvas, state, now, { highlightId: playerId });
+    Render.drawFrame(ctx, canvas, renderState(now), now, { highlightId: playerId });
     updateOverlay();
     updateStats();
-  }
-  if (state && state.gameState === 'waiting' && miniCtx && miniCanvas) {
-    Render.drawMiniMap(miniCtx, miniCanvas, state);
   }
   requestAnimationFrame(renderLoop);
 }

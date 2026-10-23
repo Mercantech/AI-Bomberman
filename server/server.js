@@ -81,6 +81,22 @@ function broadcastToLobby(pin, message) {
   }
 }
 
+/** Serialize state once per push (avoid double getState + stringify). */
+function broadcastState(pin) {
+  const lobby = lobbies.get(pin);
+  if (!lobby) return;
+  const msg = JSON.stringify({ type: 'state', data: lobby.game.getState() });
+  lobby._lastStateJson = msg;
+  lobby.clients.forEach((ws) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+  });
+  if (lobby.spectators) {
+    lobby.spectators.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    });
+  }
+}
+
 function handleInput(pin, playerId, input) {
   const lobby = lobbies.get(pin);
   if (!lobby) return;
@@ -91,13 +107,13 @@ function handleInput(pin, playerId, input) {
     case 'move': {
       const dir = normalizeDirection(input.direction);
       if (dir && game.movePlayer(playerId, dir)) {
-        broadcastToLobby(pin, { type: 'state', data: game.getState() });
+        broadcastState(pin);
       }
       break;
     }
     case 'bomb':
       if (game.placeBomb(playerId)) {
-        broadcastToLobby(pin, { type: 'state', data: game.getState() });
+        broadcastState(pin);
       }
       break;
     default:
@@ -122,6 +138,7 @@ const controller = createControllerService({
   lobbies,
   allocatePlayerId,
   broadcastToLobby,
+  broadcastState,
   applyGameInput: handleInput,
 });
 
@@ -463,7 +480,7 @@ wss.on('connection', (ws) => {
           lobby.clients.add(ws);
 
           sendTo(ws, 'joined', { playerId, pin, state: lobby.game.getState() });
-          broadcastToLobby(pin, { type: 'state', data: lobby.game.getState() });
+          broadcastState(pin);
         } else if (msg.type === 'spectate' && msg.pin) {
           const pin = String(msg.pin).trim();
           const lobby = lobbies.get(pin);
@@ -496,19 +513,22 @@ wss.on('connection', (ws) => {
             const ready = typeof msg.ready === 'boolean' ? msg.ready : undefined;
             if (ready === undefined) game.togglePlayerReady(ws.playerId);
             else game.setPlayerReady(ws.playerId, ready);
-            broadcastToLobby(pin, { type: 'state', data: game.getState() });
+            broadcastState(pin);
           }
           break;
         case 'start':
           if (game.gameState === 'waiting' && game.canStart()) {
             game.startGame();
-            broadcastToLobby(pin, { type: 'state', data: game.getState() });
+            lobby._forceSync = true;
+            lobby._endedSynced = false;
+            broadcastState(pin);
           }
           break;
         case 'reset':
           if (game.gameState === 'ended' || game.gameState === 'waiting') {
             game.reset();
-            broadcastToLobby(pin, { type: 'state', data: game.getState() });
+            lobby._endedSynced = false;
+            broadcastState(pin);
           }
           break;
         default:
@@ -528,7 +548,7 @@ wss.on('connection', (ws) => {
         } else {
           lobby.clients.delete(ws);
           if (ws.playerId) lobby.game.removePlayer(ws.playerId);
-          broadcastToLobby(ws.lobbyPin, { type: 'state', data: lobby.game.getState() });
+          broadcastState(ws.lobbyPin);
           const hasControllers = lobby.controllerPlayers && lobby.controllerPlayers.size > 0;
           if (
             lobby.clients.size === 0 &&
@@ -551,22 +571,36 @@ wss.on('connection', (ws) => {
         else {
           lobby.clients.delete(ws);
           if (ws.playerId) lobby.game.removePlayer(ws.playerId);
-          broadcastToLobby(ws.lobbyPin, { type: 'state', data: lobby.game.getState() });
+          broadcastState(ws.lobbyPin);
         }
       }
     }
   });
 });
 
+// Tick-sync (~10 Hz): bomber/eksplosioner. Moves pushes already via broadcastState.
+// Tidligere 20 Hz fuld snapshot var tungt uden ekstra smoothness (klient interpolerer).
 setInterval(() => {
   for (const [pin, lobby] of lobbies) {
     const hasClients = lobby.clients.size > 0 || (lobby.spectators && lobby.spectators.size > 0);
-    const isActive = lobby.game.gameState === 'playing' || lobby.game.gameState === 'ended';
-    if (hasClients && isActive) {
-      broadcastToLobby(pin, { type: 'state', data: lobby.game.getState() });
+    if (!hasClients) continue;
+    const gs = lobby.game.gameState;
+    if (gs === 'playing') {
+      const busy =
+        lobby.game.bombs.length > 0 ||
+        lobby.game.explosions.length > 0 ||
+        lobby._forceSync;
+      if (busy) {
+        broadcastState(pin);
+        lobby._forceSync = false;
+      }
+    } else if (gs === 'ended' && !lobby._endedSynced) {
+      broadcastState(pin);
+      lobby._endedSynced = true;
     }
+    if (gs !== 'ended') lobby._endedSynced = false;
   }
-}, 50);
+}, 100);
 
 // Fjern tomme waiting-lobbies efter 15 min (elever der opretter uden at joine)
 setInterval(() => {

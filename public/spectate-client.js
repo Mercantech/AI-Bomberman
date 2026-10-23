@@ -9,6 +9,8 @@ let currentPin = null;
 let state = null;
 let canvas, ctx;
 let intentionalLeave = false;
+let stateReceivedAt = 0;
+let lastStatsKey = '';
 
 function apiBase() {
   const m = window.location.pathname.match(/^(\/Bomberman)(?=\/|$)/);
@@ -87,11 +89,13 @@ function connect() {
       switch (msg.type) {
         case 'spectating':
           state = msg.data.state;
+          stateReceivedAt = performance.now();
           document.getElementById('spectate-info').textContent = `PIN: ${currentPin}`;
           updateStatus('Ser spil');
           break;
         case 'state':
           state = msg.data;
+          stateReceivedAt = performance.now();
           break;
         case 'error':
           document.getElementById('spectate-error').textContent = msg.data?.message || 'Ukendt fejl';
@@ -132,6 +136,11 @@ function updateStatus(text) {
 function updateStats() {
   const panel = document.getElementById('stats-panel');
   if (!panel || !state?.players?.length) return;
+  const key = state.players
+    .map((p) => `${p.id}:${p.alive}:${p.bombs}:${p.maxBombs}:${p.flameLength}:${p.kills}`)
+    .join('|');
+  if (key === lastStatsKey) return;
+  lastStatsKey = key;
   panel.innerHTML = state.players
     .map(
       (p) => `
@@ -151,9 +160,18 @@ function updateStats() {
     .join('');
 }
 
-function renderLoop() {
+function renderLoop(now) {
+  now = now || performance.now();
   if (state && canvas && ctx) {
-    Render.drawFrame(ctx, canvas, state, Date.now(), {});
+    let rs = state;
+    if (state.gameState === 'playing' && state.bombs?.length) {
+      const elapsed = now - stateReceivedAt;
+      rs = {
+        ...state,
+        bombs: state.bombs.map((b) => ({ ...b, timer: Math.max(0, (b.timer || 0) - elapsed) })),
+      };
+    }
+    Render.drawFrame(ctx, canvas, rs, now, {});
     updateStats();
   }
   requestAnimationFrame(renderLoop);

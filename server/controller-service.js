@@ -5,7 +5,8 @@
 const { normalizeDirection } = require('./game');
 
 function createControllerService(deps) {
-  const { lobbies, allocatePlayerId, broadcastToLobby, applyGameInput } = deps;
+  const { lobbies, allocatePlayerId, broadcastToLobby, broadcastState, applyGameInput } = deps;
+  const pushState = broadcastState || ((pin) => broadcastToLobby(pin, { type: 'state', data: lobbies.get(pin)?.game.getState() }));
 
   function ensureControllerMaps(lobby) {
     if (!lobby.controllerPlayers) lobby.controllerPlayers = new Map();
@@ -45,7 +46,7 @@ function createControllerService(deps) {
     });
     if (devKey) lobby.controllerDevices.set(devKey, playerId);
 
-    broadcastToLobby(pinStr, { type: 'state', data: lobby.game.getState() });
+    pushState(pinStr);
     console.log('[CONTROLLER JOIN] OK playerId=%s name=%s pin=%s', playerId, displayName, pinStr);
     return { status: 200, body: { ok: true, playerId, name: displayName } };
   }
