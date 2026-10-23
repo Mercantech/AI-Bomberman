@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bomberman - Multiplayer</title>
-  <!-- Under /Bomberman uden trailing slash resolver relative CSS til /style.css — ret base først -->
   <script>
     (function () {
       var m = location.pathname.match(/^(\/Bomberman)(?=\/|$)/);
@@ -17,33 +16,115 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=5">
   <link rel="stylesheet" href="arena-nav.css?v=2">
 </head>
 <body>
   <script src="arena-nav.js?v=3"></script>
   <div id="app">
-    <!-- PIN join-skærm -->
+    <!-- Home / lobby hub -->
     <div id="join-screen">
-      <h1>Bomberman</h1>
-      <p class="join-hint">Indtast PIN fra spillet for at deltage</p>
-      <div class="join-form">
-        <input type="text" id="pin-input" placeholder="PIN (fx 1234)" maxlength="8" autocomplete="off">
-        <input type="text" id="name-input" placeholder="Navn (valgfri)" maxlength="20" autocomplete="off">
-        <button id="btn-join">Join spil</button>
+      <div class="hero">
+        <p class="hero-kicker">Mercantec Games</p>
+        <h1 class="brand">Bomberman</h1>
+        <p class="hero-tagline">Plant bomber. Bryd kasser. Vær den sidste i live.</p>
+        <div class="hero-actions">
+          <button type="button" id="btn-mute" class="btn-ghost" title="Lyd">Lyd: On</button>
+        </div>
       </div>
+
+      <div class="lobby-panels">
+        <section class="lobby-panel create-panel">
+          <h2>Opret spil</h2>
+          <p class="panel-hint">Start et rum — del PIN med klassen</p>
+          <label class="field-label" for="create-name">Dit navn</label>
+          <input type="text" id="create-name" placeholder="Navn" maxlength="20" autocomplete="nickname">
+          <label class="field-label" for="create-grid">Banestørrelse</label>
+          <select id="create-grid">
+            <option value="9">9×9 — hurtig</option>
+            <option value="13" selected>13×13 — classic</option>
+            <option value="17">17×17 — stor</option>
+            <option value="21">21×21 — kaos</option>
+          </select>
+          <button type="button" id="btn-create" class="btn-primary">Opret spil</button>
+        </section>
+
+        <section class="lobby-panel join-panel">
+          <h2>Join med PIN</h2>
+          <p class="panel-hint">Har du allerede en kode?</p>
+          <label class="field-label" for="name-input">Dit navn</label>
+          <input type="text" id="name-input" placeholder="Navn (valgfri)" maxlength="20" autocomplete="nickname">
+          <label class="field-label" for="pin-input">PIN</label>
+          <input type="text" id="pin-input" placeholder="1234" maxlength="8" autocomplete="off" inputmode="numeric">
+          <button type="button" id="btn-join" class="btn-primary">Join spil</button>
+        </section>
+      </div>
+
       <p id="join-error" class="join-error hidden"></p>
-      <a href="admin.html" class="admin-link">Admin – opret spil</a>
+
+      <section class="open-lobbies">
+        <div class="open-lobbies-head">
+          <h2>Åbne lobbies</h2>
+          <button type="button" id="btn-refresh-lobbies" class="btn-ghost btn-sm">Opdater</button>
+        </div>
+        <div id="open-lobby-list" class="open-lobby-list"></div>
+        <p id="no-open-lobbies" class="muted">Ingen åbne lobbies — opret et spil!</p>
+      </section>
+
+      <nav class="home-links">
+        <a href="spectate.html">Se som tilskuer</a>
+        <a href="admin.html">Lærer-værktøj</a>
+      </nav>
     </div>
 
-    <!-- Spil-skærm (skjult indtil join) -->
+    <!-- Waiting room -->
+    <div id="waiting-screen" class="hidden">
+      <header class="waiting-header">
+        <h1 class="brand-sm">Bomberman</h1>
+        <div class="pin-share">
+          <span class="pin-label">PIN</span>
+          <span id="waiting-pin" class="pin-code">----</span>
+          <button type="button" id="btn-copy-pin" class="btn-ghost btn-sm">Kopiér</button>
+        </div>
+        <div id="status" class="status-pill">Forbinder...</div>
+      </header>
+
+      <div class="waiting-layout">
+        <div class="waiting-players">
+          <h2>Spillere</h2>
+          <div id="player-cards" class="player-cards"></div>
+        </div>
+        <div class="waiting-map">
+          <h2>Bane</h2>
+          <canvas id="mini-map" width="220" height="220"></canvas>
+          <p id="waiting-grid-info" class="muted"></p>
+        </div>
+      </div>
+
+      <div class="waiting-actions">
+        <button type="button" id="btn-ready" class="btn-secondary">Klar</button>
+        <button type="button" id="btn-start" class="btn-primary" disabled>Start spil</button>
+        <a id="link-spectate" class="btn-ghost" href="spectate.html">Spectate</a>
+        <button type="button" id="btn-leave" class="btn-ghost">Forlad</button>
+      </div>
+      <p id="player-info" class="waiting-you"></p>
+      <p class="arduino-row">
+        <button id="btn-arduino" type="button" class="btn-arduino">Forbind Arduino Oplà</button>
+        <span id="arduino-status"></span>
+      </p>
+    </div>
+
+    <!-- In-game -->
     <div id="game-screen" class="hidden">
-      <header>
-        <h1>Bomberman</h1>
-        <div id="status">Forbinder...</div>
+      <header class="game-header">
+        <h1 class="brand-sm">Bomberman</h1>
+        <div id="game-status" class="status-pill">Spiller</div>
         <div id="controls">
-          <button id="btn-start" disabled>Start spil</button>
           <button id="btn-reset" disabled>Nyt spil</button>
+          <button type="button" id="btn-mute-game" class="btn-ghost btn-sm">Lyd</button>
         </div>
       </header>
 
@@ -52,23 +133,21 @@
         <canvas id="game-canvas"></canvas>
         <div id="overlay" class="hidden">
           <div id="overlay-content">
-            <h2 id="overlay-title">Venter på spillere</h2>
-            <p id="overlay-text">Tryk "Start spil" for at begynde</p>
+            <h2 id="overlay-title">Venter</h2>
+            <p id="overlay-text"></p>
           </div>
         </div>
+        <div id="countdown" class="countdown hidden"></div>
       </div>
 
       <footer>
-        <p>Pil eller WASD: Bevæg | Mellemrum: Placer bombe</p>
-        <p id="player-info"></p>
-        <p class="arduino-row">
-          <button id="btn-arduino" type="button" class="btn-arduino">🔌 Forbind Arduino Oplà</button>
-          <span id="arduino-status"></span>
-        </p>
+        <p>Pil / WASD: bevæg &nbsp;|&nbsp; Mellemrum: bombe</p>
       </footer>
     </div>
   </div>
 
-  <script src="game-client.js"></script>
+  <script src="sfx.js?v=1"></script>
+  <script src="render.js?v=1"></script>
+  <script src="game-client.js?v=5"></script>
 </body>
 </html>

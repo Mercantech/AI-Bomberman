@@ -2,6 +2,8 @@
  * Fælles controller-logik for HTTP og MQTT (Oplà).
  */
 
+const { normalizeDirection } = require('./game');
+
 function createControllerService(deps) {
   const { lobbies, allocatePlayerId, broadcastToLobby, applyGameInput } = deps;
 
@@ -35,6 +37,8 @@ function createControllerService(deps) {
     const playerId = allocatePlayerId();
     const displayName = name ? String(name).trim().slice(0, 20) : `Arduino ${playerId.replace('player_', '')}`;
     lobby.game.addPlayer(playerId, displayName);
+    const player = lobby.game.players.get(playerId);
+    if (player) player.isController = true;
     lobby.controllerPlayers.set(playerId, {
       name: displayName,
       deviceId: devKey,
@@ -71,10 +75,11 @@ function createControllerService(deps) {
 
     let data;
     if (resolvedAction === 'move') {
-      if (!['UP', 'DOWN', 'LEFT', 'RIGHT', 'up', 'down', 'left', 'right'].includes(resolvedDirection)) {
+      const dir = normalizeDirection(resolvedDirection);
+      if (!dir) {
         return { status: 400, body: { ok: false, error: 'direction påkrævet for move' } };
       }
-      data = { action: 'move', direction: resolvedDirection };
+      data = { action: 'move', direction: dir };
     } else if (resolvedAction === 'bomb') {
       data = { action: 'bomb' };
     } else {

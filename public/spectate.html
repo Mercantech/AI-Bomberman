@@ -16,27 +16,33 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=5">
   <link rel="stylesheet" href="arena-nav.css?v=2">
 </head>
 <body>
   <script src="arena-nav.js?v=3"></script>
   <div id="spectate-app">
     <div id="spectate-join">
-      <h1>Bomberman Spectator</h1>
-      <p class="spectate-hint">Indtast PIN for at se spillet</p>
+      <p class="hero-kicker">Mercantec Games</p>
+      <h1 class="brand">Spectator</h1>
+      <p class="spectate-hint">Indtast PIN for at se et spil live</p>
       <div class="join-form">
         <input type="text" id="pin-input" placeholder="PIN" maxlength="8" autocomplete="off">
         <button id="btn-watch">Se spil</button>
       </div>
       <p id="spectate-error" class="join-error hidden"></p>
-      <a href="./" class="admin-link">Tilbage til spil</a>
+      <nav class="home-links">
+        <a href="./">Tilbage til lobby</a>
+      </nav>
     </div>
 
     <div id="spectate-view" class="hidden">
-      <header>
-        <h1>Bomberman Spectator</h1>
-        <div id="status">Forbinder...</div>
+      <header class="game-header">
+        <h1 class="brand-sm">Spectator</h1>
+        <div id="status" class="status-pill">Forbinder...</div>
       </header>
       <div id="stats-panel"></div>
       <div id="game-container">
@@ -49,6 +55,7 @@
     </div>
   </div>
 
-  <script src="spectate-client.js"></script>
+  <script src="render.js?v=1"></script>
+  <script src="spectate-client.js?v=5"></script>
 </body>
 </html>

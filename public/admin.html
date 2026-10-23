@@ -16,7 +16,10 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=5">
   <link rel="stylesheet" href="admin.css?v=3">
   <link rel="stylesheet" href="arena-nav.css?v=2">
 </head>
@@ -24,12 +27,13 @@
   <script src="arena-nav.js?v=3"></script>
   <div id="admin-app">
     <header>
-      <h1>Bomberman Admin</h1>
-      <a href="./" class="back-link">← Tilbage til spil</a>
+      <h1>Bomberman — lærer-værktøj</h1>
+      <p class="muted" style="margin:8px 0 12px">Elever opretter normalt spil selv fra forsiden. Her kan du overvåge og lukke lobbies.</p>
+      <a href="./" class="back-link">← Tilbage til lobby</a>
     </header>
 
     <section id="create-lobby">
-      <h2>Opret nyt spil</h2>
+      <h2>Opret spil (valgfrit)</h2>
       <form id="create-form">
         <div class="form-row">
           <label for="pin-input">PIN (valgfri, ellers genereres automatisk)</label>

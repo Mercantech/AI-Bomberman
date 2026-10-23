@@ -1,46 +1,114 @@
 /**
- * Bomberman WebSocket Client
- * Join via PIN, subscriber til spilstaten, sender inputs
+ * Bomberman client — open lobby, waiting room, sprite render
  */
 
-const CELL = { EMPTY: 0, SOLID: 1, BRICK: 2 };
-const POWERUP = { NONE: 0, BOMB: 1, FLAME: 2, SPEED: 3 };
-const TILE_SIZE = 32;
-const CANVAS_PADDING = 2;
+const Sfx = window.BombermanSfx;
+const Render = window.BombermanRender;
 
 let ws = null;
 let playerId = null;
 let currentPin = null;
 let currentName = '';
 let state = null;
-let canvas, ctx;
+let canvas, ctx, miniCanvas, miniCtx;
 let keys = {};
+let lobbyPollTimer = null;
+let prevBombCount = 0;
+let prevExplosionCount = 0;
+let prevAlive = {};
+let prevPowerups = 0;
+let countdownActive = false;
+let lastGameState = null;
+let intentionalLeave = false;
+
+function apiBase() {
+  const m = window.location.pathname.match(/^(\/Bomberman)(?=\/|$)/);
+  return m ? m[1] : '';
+}
 
 function init() {
   canvas = document.getElementById('game-canvas');
-  ctx = canvas.getContext('2d');
+  ctx = canvas?.getContext('2d');
+  miniCanvas = document.getElementById('mini-map');
+  miniCtx = miniCanvas?.getContext('2d');
+
+  Sfx?.loadMutePref();
+  updateMuteButtons();
 
   const pinInput = document.getElementById('pin-input');
   const urlPin = new URLSearchParams(window.location.search).get('pin');
   if (urlPin && pinInput) {
     pinInput.value = urlPin.trim();
-    tryJoin();
   }
 
-  document.getElementById('btn-join').addEventListener('click', tryJoin);
+  document.getElementById('btn-join')?.addEventListener('click', () => {
+    Sfx?.click();
+    tryJoin();
+  });
   pinInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') tryJoin();
   });
+  document.getElementById('btn-create')?.addEventListener('click', () => {
+    Sfx?.click();
+    createLobby();
+  });
+  document.getElementById('btn-refresh-lobbies')?.addEventListener('click', () => {
+    Sfx?.click();
+    refreshOpenLobbies();
+  });
+  document.getElementById('btn-ready')?.addEventListener('click', toggleReady);
+  document.getElementById('btn-start')?.addEventListener('click', () => {
+    if (ws?.readyState === WebSocket.OPEN) {
+      Sfx?.start();
+      ws.send(JSON.stringify({ type: 'start' }));
+    }
+  });
+  document.getElementById('btn-reset')?.addEventListener('click', () => {
+    if (ws?.readyState === WebSocket.OPEN) {
+      Sfx?.click();
+      ws.send(JSON.stringify({ type: 'reset' }));
+    }
+  });
+  document.getElementById('btn-leave')?.addEventListener('click', leaveLobby);
+  document.getElementById('btn-copy-pin')?.addEventListener('click', copyPin);
+  document.getElementById('btn-mute')?.addEventListener('click', toggleMute);
+  document.getElementById('btn-mute-game')?.addEventListener('click', toggleMute);
 
   setupControls();
-  setupButtons();
   setupArduinoController();
+  refreshOpenLobbies();
+  lobbyPollTimer = setInterval(refreshOpenLobbies, 2500);
+
+  if (urlPin && pinInput?.value) {
+    tryJoin();
+  }
+
   requestAnimationFrame(renderLoop);
 }
 
-function showJoinScreen() {
-  document.getElementById('join-screen').style.display = 'block';
-  document.getElementById('game-screen').classList.add('hidden');
+function updateMuteButtons() {
+  const label = Sfx?.isMuted() ? 'Lyd: Off' : 'Lyd: On';
+  const a = document.getElementById('btn-mute');
+  const b = document.getElementById('btn-mute-game');
+  if (a) a.textContent = label;
+  if (b) b.textContent = label;
+}
+
+function toggleMute() {
+  Sfx?.toggleMute();
+  updateMuteButtons();
+}
+
+function showScreen(id) {
+  ['join-screen', 'waiting-screen', 'game-screen'].forEach((sid) => {
+    const el = document.getElementById(sid);
+    if (!el) return;
+    el.classList.toggle('hidden', sid !== id);
+  });
+}
+
+function showJoinScreen(msg) {
+  intentionalLeave = true;
   if (ws) {
     ws.close();
     ws = null;
@@ -48,12 +116,105 @@ function showJoinScreen() {
   state = null;
   playerId = null;
   currentPin = null;
-  currentName = '';
+  lastGameState = null;
+  countdownActive = false;
+  showScreen('join-screen');
+  if (msg) {
+    const err = document.getElementById('join-error');
+    err.textContent = msg;
+    err.classList.remove('hidden');
+  }
+  refreshOpenLobbies();
+  setTimeout(() => {
+    intentionalLeave = false;
+  }, 100);
 }
 
-function showGameScreen() {
-  document.getElementById('join-screen').style.display = 'none';
-  document.getElementById('game-screen').classList.remove('hidden');
+function leaveLobby() {
+  Sfx?.click();
+  showJoinScreen();
+}
+
+async function createLobby() {
+  const err = document.getElementById('join-error');
+  err.classList.add('hidden');
+  const gridSize = document.getElementById('create-grid')?.value || 13;
+  const name =
+    document.getElementById('create-name')?.value.trim() ||
+    document.getElementById('name-input')?.value.trim() ||
+    '';
+  try {
+    const res = await fetch(`${apiBase()}/api/lobbies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gridSize: parseInt(gridSize, 10) }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Kunne ikke oprette lobby');
+    currentPin = String(data.pin);
+    currentName = name;
+    const pinInput = document.getElementById('pin-input');
+    if (pinInput) pinInput.value = currentPin;
+    if (name) {
+      const ni = document.getElementById('name-input');
+      if (ni) ni.value = name;
+    }
+    connect();
+  } catch (e) {
+    err.textContent = e.message || 'Fejl ved oprettelse';
+    err.classList.remove('hidden');
+  }
+}
+
+async function refreshOpenLobbies() {
+  const list = document.getElementById('open-lobby-list');
+  const empty = document.getElementById('no-open-lobbies');
+  if (!list) return;
+  if (document.getElementById('join-screen')?.classList.contains('hidden')) return;
+  try {
+    const res = await fetch(`${apiBase()}/api/lobbies`);
+    const data = await res.json();
+    const lobbies = data.lobbies || [];
+    if (!lobbies.length) {
+      list.innerHTML = '';
+      empty?.classList.remove('hidden');
+      return;
+    }
+    empty?.classList.add('hidden');
+    list.innerHTML = lobbies
+      .map(
+        (l) => `
+      <div class="open-lobby-row" data-pin="${escapeHtml(l.pin)}">
+        <div class="open-lobby-meta">
+          <span class="pin">${escapeHtml(l.pin)}</span>
+          <span>${l.playerCount} spiller(e)</span>
+          <span>${l.gridSize}×${l.gridSize}</span>
+        </div>
+        <button type="button" class="btn-secondary btn-sm btn-join-open">Deltag</button>
+      </div>`
+      )
+      .join('');
+    list.querySelectorAll('.btn-join-open').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.open-lobby-row');
+        const pin = row?.dataset.pin;
+        if (!pin) return;
+        Sfx?.click();
+        const pinInput = document.getElementById('pin-input');
+        if (pinInput) pinInput.value = pin;
+        tryJoin();
+      });
+    });
+  } catch (_) {
+    /* ignore poll errors */
+  }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/"/g, '&quot;');
 }
 
 function tryJoin() {
@@ -73,14 +234,15 @@ function tryJoin() {
 
 function connect() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host;
-  const baseMatch = window.location.pathname.match(/^(\/Bomberman)(?=\/|$)/);
-  const basePath = baseMatch ? baseMatch[1] : '';
-  const url = `${protocol}//${host}${basePath}`;
+  const url = `${protocol}//${window.location.host}${apiBase()}`;
 
   updateStatus('Forbinder...', false);
-  showGameScreen();
+  showScreen('waiting-screen');
+  document.getElementById('waiting-pin').textContent = currentPin || '----';
+  const spec = document.getElementById('link-spectate');
+  if (spec) spec.href = `spectate.html?pin=${encodeURIComponent(currentPin || '')}`;
 
+  intentionalLeave = false;
   ws = new WebSocket(url);
 
   ws.onopen = () => {
@@ -93,26 +255,18 @@ function connect() {
       switch (msg.type) {
         case 'joined':
           playerId = msg.data.playerId;
-          state = msg.data.state;
-          const myPlayer = msg.data.state?.players?.find(p => p.id === playerId);
-          const displayName = myPlayer?.name || playerId;
-          document.getElementById('player-info').textContent = `Du er: ${displayName} | PIN: ${currentPin}`;
+          applyState(msg.data.state);
           updateStatus('Forbundet', true);
           break;
         case 'state':
-          state = msg.data;
+          applyState(msg.data);
           break;
         case 'error':
           updateStatus('Fejl', false);
-          document.getElementById('join-error').textContent = msg.data?.message || 'Ukendt fejl';
-          document.getElementById('join-error').classList.remove('hidden');
-          showJoinScreen();
+          showJoinScreen(msg.data?.message || 'Ukendt fejl');
           break;
         case 'lobbyEnded':
-          updateStatus('Lobby lukket', false);
-          document.getElementById('join-error').textContent = 'Spillet er blevet afsluttet af admin';
-          document.getElementById('join-error').classList.remove('hidden');
-          showJoinScreen();
+          showJoinScreen('Spillet er blevet afsluttet');
           break;
         default:
           break;
@@ -123,25 +277,214 @@ function connect() {
   };
 
   ws.onclose = () => {
-    if (document.getElementById('game-screen').classList.contains('hidden')) return;
+    if (intentionalLeave) return;
+    if (document.getElementById('join-screen') && !document.getElementById('join-screen').classList.contains('hidden')) {
+      return;
+    }
     updateStatus('Forbindelse mistet', false);
     setTimeout(() => {
-      if (currentPin && !ws) return;
-      connect();
+      if (currentPin && !intentionalLeave) connect();
     }, 2000);
   };
 
-  ws.onerror = () => {
-    updateStatus('Fejl', false);
+  ws.onerror = () => updateStatus('Fejl', false);
+}
+
+function applyState(next) {
+  const prev = state;
+  state = next;
+  detectSfx(prev, next);
+
+  if (next.gameState === 'waiting') {
+    showScreen('waiting-screen');
+    updateWaitingRoom();
+  } else if (next.gameState === 'playing' || next.gameState === 'ended') {
+    if (lastGameState === 'waiting' && next.gameState === 'playing') {
+      runCountdown();
+    }
+    showScreen('game-screen');
+    updateGameChrome();
+  }
+  lastGameState = next.gameState;
+}
+
+function detectSfx(prev, next) {
+  if (!next || !Sfx) return;
+  const bombs = next.bombs?.length || 0;
+  const exps = next.explosions?.length || 0;
+  const pus = next.powerups?.length || 0;
+
+  if (prev && bombs > prevBombCount) Sfx.bomb();
+  if (prev && exps > prevExplosionCount) Sfx.explode();
+  if (prev && pus < prevPowerups) Sfx.pickup();
+
+  if (prev?.players) {
+    for (const p of next.players || []) {
+      const was = prevAlive[p.id];
+      if (was === true && !p.alive) Sfx.death();
+    }
+    if (next.gameState === 'ended' && prev.gameState === 'playing' && next.winnerId === playerId) {
+      Sfx.win();
+    }
+  }
+
+  prevBombCount = bombs;
+  prevExplosionCount = exps;
+  prevPowerups = pus;
+  prevAlive = {};
+  for (const p of next.players || []) prevAlive[p.id] = p.alive;
+}
+
+function runCountdown() {
+  if (countdownActive) return;
+  const el = document.getElementById('countdown');
+  if (!el) return;
+  countdownActive = true;
+  el.classList.remove('hidden');
+  let n = 3;
+  const tick = () => {
+    if (n > 0) {
+      el.textContent = String(n);
+      Sfx?.countdown();
+      n--;
+      setTimeout(tick, 700);
+    } else {
+      el.textContent = 'GO!';
+      setTimeout(() => {
+        el.classList.add('hidden');
+        countdownActive = false;
+      }, 400);
+    }
   };
+  tick();
 }
 
 function updateStatus(text, connected) {
   const el = document.getElementById('status');
   if (el) {
     el.textContent = text;
-    el.className = connected ? 'connected' : 'disconnected';
+    el.className = 'status-pill ' + (connected ? 'connected' : 'disconnected');
   }
+  const gs = document.getElementById('game-status');
+  if (gs && state) {
+    gs.textContent =
+      state.gameState === 'playing' ? 'Live' : state.gameState === 'ended' ? 'Slut' : text;
+    gs.className = 'status-pill ' + (connected ? 'connected' : 'disconnected');
+  }
+}
+
+function updateWaitingRoom() {
+  if (!state) return;
+  document.getElementById('waiting-pin').textContent = currentPin || '----';
+  document.getElementById('waiting-grid-info').textContent = `${state.gridSize}×${state.gridSize} · classic maze`;
+  const me = state.players?.find((p) => p.id === playerId);
+  document.getElementById('player-info').textContent = me
+    ? `Du er: ${me.name || playerId}`
+    : '';
+
+  const cards = document.getElementById('player-cards');
+  cards.innerHTML = (state.players || [])
+    .map((p) => {
+      const isMe = p.id === playerId;
+      const isHost = state.hostId === p.id;
+      return `
+      <div class="player-card ${isMe ? 'is-me' : ''} ${p.ready ? 'is-ready' : ''}">
+        <div class="player-avatar" style="background:${p.color}"></div>
+        <div class="player-card-info">
+          <div class="player-card-name">${escapeHtml(p.name || p.id)}${isMe ? ' (dig)' : ''}</div>
+          <div class="player-card-badges">
+            ${isHost ? '<span class="badge host">HOST</span>' : ''}
+            ${p.isController ? '<span class="badge arduino">OPLÀ</span>' : ''}
+            <span class="badge ${p.ready ? 'ready' : ''}">${p.ready ? 'KLAR' : 'VENTER'}</span>
+          </div>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  const readyBtn = document.getElementById('btn-ready');
+  if (readyBtn && me) {
+    readyBtn.textContent = me.ready ? 'Ikke klar' : 'Klar';
+    readyBtn.classList.toggle('is-ready', !!me.ready);
+  }
+
+  const startBtn = document.getElementById('btn-start');
+  if (startBtn) startBtn.disabled = state.gameState !== 'waiting' || !(state.players?.length >= 1);
+
+  if (miniCtx && miniCanvas) {
+    Render.drawMiniMap(miniCtx, miniCanvas, state);
+  }
+}
+
+function updateGameChrome() {
+  const resetBtn = document.getElementById('btn-reset');
+  if (resetBtn) resetBtn.disabled = !state;
+  updateOverlay();
+  updateStats();
+}
+
+function updateOverlay() {
+  const overlay = document.getElementById('overlay');
+  const title = document.getElementById('overlay-title');
+  const text = document.getElementById('overlay-text');
+  if (!overlay || !title || !text || !state) return;
+
+  if (state.gameState === 'ended') {
+    overlay.classList.remove('hidden');
+    const iWon = state.winnerId === playerId;
+    overlay.classList.toggle('victory', iWon);
+    overlay.classList.toggle('defeat', !iWon);
+    title.textContent = iWon ? 'Du vandt!' : 'Spillet er slut';
+    text.textContent = iWon ? 'Tillykke!' : 'Tryk "Nyt spil" for at spille igen';
+  } else {
+    overlay.classList.add('hidden');
+  }
+}
+
+function updateStats() {
+  const panel = document.getElementById('stats-panel');
+  if (!panel || !state?.players?.length) return;
+  panel.innerHTML = state.players
+    .map((p) => {
+      const isMe = p.id === playerId;
+      return `
+      <div class="stat-card ${isMe ? 'stat-card-me' : ''} ${p.alive ? '' : 'dead'}">
+        <div class="stat-avatar" style="background:${p.color}"></div>
+        <div class="stat-details">
+          <span class="stat-name">${escapeHtml(p.name || p.id)}${isMe ? ' (dig)' : ''}</span>
+          <div class="stat-row">
+            <span><span class="stat-icon">HP</span>${p.alive ? 'OK' : 'OUT'}</span>
+            <span><span class="stat-icon">B</span>${p.bombs}/${p.maxBombs}</span>
+            <span><span class="stat-icon">F</span>${p.flameLength}</span>
+            <span><span class="stat-icon">S</span>${(p.speed || 1).toFixed(1)}</span>
+            <span><span class="stat-icon">K</span>${p.kills || 0}</span>
+          </div>
+        </div>
+      </div>`;
+    })
+    .join('');
+}
+
+function toggleReady() {
+  if (ws?.readyState === WebSocket.OPEN) {
+    Sfx?.ready();
+    ws.send(JSON.stringify({ type: 'ready' }));
+  }
+}
+
+function copyPin() {
+  if (!currentPin) return;
+  navigator.clipboard?.writeText(currentPin).then(() => {
+    Sfx?.click();
+    const btn = document.getElementById('btn-copy-pin');
+    if (btn) {
+      const t = btn.textContent;
+      btn.textContent = 'Kopieret!';
+      setTimeout(() => {
+        btn.textContent = t;
+      }, 1200);
+    }
+  });
 }
 
 function isTypingInInput() {
@@ -163,20 +506,37 @@ function setupControls() {
   });
 }
 
-let serialReader = null;
 let serialPort = null;
 
 function applyArduinoCommand(cmd) {
   const c = String(cmd).trim().toUpperCase();
-  if (c === 'UP') { keys['ArrowUp'] = true; keys['KeyW'] = true; }
-  else if (c === 'RELEASE_UP') { keys['ArrowUp'] = false; keys['KeyW'] = false; }
-  else if (c === 'DOWN') { keys['ArrowDown'] = true; keys['KeyS'] = true; }
-  else if (c === 'RELEASE_DOWN') { keys['ArrowDown'] = false; keys['KeyS'] = false; }
-  else if (c === 'LEFT') { keys['ArrowLeft'] = true; keys['KeyA'] = true; }
-  else if (c === 'RELEASE_LEFT') { keys['ArrowLeft'] = false; keys['KeyA'] = false; }
-  else if (c === 'RIGHT') { keys['ArrowRight'] = true; keys['KeyD'] = true; }
-  else if (c === 'RELEASE_RIGHT') { keys['ArrowRight'] = false; keys['KeyD'] = false; }
-  else if (c === 'BOMB') { keys['Space'] = true; }
+  if (c === 'UP') {
+    keys['ArrowUp'] = true;
+    keys['KeyW'] = true;
+  } else if (c === 'RELEASE_UP') {
+    keys['ArrowUp'] = false;
+    keys['KeyW'] = false;
+  } else if (c === 'DOWN') {
+    keys['ArrowDown'] = true;
+    keys['KeyS'] = true;
+  } else if (c === 'RELEASE_DOWN') {
+    keys['ArrowDown'] = false;
+    keys['KeyS'] = false;
+  } else if (c === 'LEFT') {
+    keys['ArrowLeft'] = true;
+    keys['KeyA'] = true;
+  } else if (c === 'RELEASE_LEFT') {
+    keys['ArrowLeft'] = false;
+    keys['KeyA'] = false;
+  } else if (c === 'RIGHT') {
+    keys['ArrowRight'] = true;
+    keys['KeyD'] = true;
+  } else if (c === 'RELEASE_RIGHT') {
+    keys['ArrowRight'] = false;
+    keys['KeyD'] = false;
+  } else if (c === 'BOMB') {
+    keys['Space'] = true;
+  }
 }
 
 async function connectArduinoController() {
@@ -189,7 +549,10 @@ async function connectArduinoController() {
     await port.open({ baudRate: 115200 });
     serialPort = port;
     const el = document.getElementById('arduino-status');
-    if (el) { el.textContent = 'Arduino forbundet'; el.classList.add('connected'); }
+    if (el) {
+      el.textContent = 'Arduino forbundet';
+      el.classList.add('connected');
+    }
     document.getElementById('btn-arduino')?.classList.add('hidden');
     let buffer = '';
     const decoder = new TextDecoderStream();
@@ -205,35 +568,25 @@ async function connectArduinoController() {
     }
   } catch (err) {
     if (err.name !== 'NotFoundError') {
-      console.error('Arduino:', err);
       alert('Kunne ikke forbinde til Arduino: ' + (err.message || err));
     }
   } finally {
     serialPort = null;
     const st = document.getElementById('arduino-status');
-    if (st) { st.textContent = ''; st.classList.remove('connected'); }
+    if (st) {
+      st.textContent = '';
+      st.classList.remove('connected');
+    }
     document.getElementById('btn-arduino')?.classList.remove('hidden');
   }
 }
 
 function setupArduinoController() {
-  const btn = document.getElementById('btn-arduino');
-  if (btn) btn.addEventListener('click', connectArduinoController);
-}
-
-function setupButtons() {
-  const startBtn = document.getElementById('btn-start');
-  const resetBtn = document.getElementById('btn-reset');
-  if (startBtn) startBtn.addEventListener('click', () => {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'start' }));
-  });
-  if (resetBtn) resetBtn.addEventListener('click', () => {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'reset' }));
-  });
+  document.getElementById('btn-arduino')?.addEventListener('click', connectArduinoController);
 }
 
 function sendInput(action, data = {}) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'input', data: { action, ...data } }));
   }
 }
@@ -241,7 +594,7 @@ function sendInput(action, data = {}) {
 let lastMoveTime = 0;
 const MOVE_COOLDOWN = 80;
 function handleInput() {
-  if (!state || state.gameState !== 'playing') return;
+  if (!state || state.gameState !== 'playing' || countdownActive) return;
   const now = Date.now();
   if (now - lastMoveTime < MOVE_COOLDOWN) return;
 
@@ -251,173 +604,28 @@ function handleInput() {
   else if (keys['ArrowLeft'] || keys['KeyA']) dir = 'LEFT';
   else if (keys['ArrowRight'] || keys['KeyD']) dir = 'RIGHT';
 
-  if (dir) { sendInput('move', { direction: dir }); lastMoveTime = now; }
-  if (keys['Space']) { sendInput('bomb'); keys['Space'] = false; }
+  if (dir) {
+    sendInput('move', { direction: dir });
+    lastMoveTime = now;
+  }
+  if (keys['Space']) {
+    sendInput('bomb');
+    keys['Space'] = false;
+  }
 }
 setInterval(handleInput, 50);
 
-function updateButtons() {
-  const startBtn = document.getElementById('btn-start');
-  const resetBtn = document.getElementById('btn-reset');
-  if (!startBtn || !resetBtn) return;
-  if (state) {
-    startBtn.disabled = state.gameState !== 'waiting';
-    resetBtn.disabled = false;
-  } else {
-    startBtn.disabled = true;
-    resetBtn.disabled = true;
-  }
-}
-
-function updateOverlay() {
-  const overlay = document.getElementById('overlay');
-  const title = document.getElementById('overlay-title');
-  const text = document.getElementById('overlay-text');
-  if (!overlay || !title || !text) return;
-
-  if (!state) {
-    overlay.classList.remove('hidden');
-    title.textContent = 'Forbinder...';
-    text.textContent = '';
-    return;
-  }
-
-  if (state.gameState === 'waiting') {
-    overlay.classList.remove('hidden', 'victory', 'defeat');
-    title.textContent = 'Venter på spillere';
-    text.textContent = `Tryk "Start spil" for at begynde (${state.players.length} spiller(e))`;
-    return;
-  }
-
-  if (state.gameState === 'ended') {
-    overlay.classList.remove('hidden');
-    const iWon = state.winnerId === playerId;
-    overlay.classList.toggle('victory', iWon);
-    overlay.classList.toggle('defeat', !iWon);
-    title.textContent = iWon ? 'Du vandt!' : 'Spillet er slut';
-    text.textContent = iWon ? 'Tillykke!' : 'Tryk "Nyt spil" for at spille igen';
-    return;
-  }
-
-  if (state.gameState === 'playing') {
-    overlay.classList.add('hidden');
-  }
-}
-
-function updateStats() {
-  const panel = document.getElementById('stats-panel');
-  if (!panel || !state || !state.players?.length) return;
-  panel.innerHTML = state.players.map(p => {
-    const isMe = p.id === playerId;
-    const liveIcon = p.alive ? '❤️' : '💀';
-    const displayName = p.name || p.id;
-    return `
-      <div class="stat-card ${isMe ? 'stat-card-me' : ''}">
-        <div class="stat-avatar" style="background:${p.color}"></div>
-        <div class="stat-details">
-          <span class="stat-name">${displayName}${isMe ? ' (dig)' : ''}</span>
-          <div class="stat-row">
-            <span title="Liv">${liveIcon}</span>
-            <span title="Bomber">💣 ${p.bombs}/${p.maxBombs}</span>
-            <span title="Kills">⚔️ ${p.kills || 0}</span>
-            <span title="Flamme">🔥 ${p.flameLength}</span>
-            <span title="Hastighed">⚡ ${p.speed?.toFixed(1) || 1}</span>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
 function renderLoop() {
-  if (state) {
-    const gridSize = state.gridSize || 13;
-    const size = gridSize * TILE_SIZE + CANVAS_PADDING * 2;
-    if (canvas && (canvas.width !== size || canvas.height !== size)) {
-      canvas.width = size;
-      canvas.height = size;
-    }
-    render();
-    updateButtons();
+  const now = Date.now();
+  if (state && canvas && ctx && (state.gameState === 'playing' || state.gameState === 'ended')) {
+    Render.drawFrame(ctx, canvas, state, now, { highlightId: playerId });
     updateOverlay();
     updateStats();
   }
+  if (state && state.gameState === 'waiting' && miniCtx && miniCanvas) {
+    Render.drawMiniMap(miniCtx, miniCanvas, state);
+  }
   requestAnimationFrame(renderLoop);
-}
-
-function render() {
-  if (!state || !ctx) return;
-  const gs = state.gridSize || 13;
-  const pad = CANVAS_PADDING;
-
-  ctx.fillStyle = '#1a1a2e';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  for (let y = 0; y < gs; y++) {
-    for (let x = 0; x < gs; x++) {
-      const cell = state.grid[y][x];
-      const px = pad + x * TILE_SIZE;
-      const py = pad + y * TILE_SIZE;
-      if (cell === CELL.SOLID) {
-        ctx.fillStyle = '#2c3e50';
-        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-        ctx.strokeStyle = '#34495e';
-        ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
-      } else if (cell === CELL.BRICK) {
-        ctx.fillStyle = '#8b4513';
-        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-        ctx.fillStyle = '#a0522d';
-        ctx.fillRect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
-      } else {
-        ctx.fillStyle = '#2a2a3e';
-        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-      }
-    }
-  }
-
-  for (const pu of state.powerups || []) {
-    const px = pad + pu.x * TILE_SIZE;
-    const py = pad + pu.y * TILE_SIZE;
-    ctx.font = '20px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    if (pu.type === POWERUP.BOMB) ctx.fillStyle = '#e74c3c';
-    else if (pu.type === POWERUP.FLAME) ctx.fillStyle = '#f39c12';
-    else ctx.fillStyle = '#3498db';
-    ctx.fillText(pu.type === POWERUP.BOMB ? 'B' : pu.type === POWERUP.FLAME ? 'F' : 'S', px + TILE_SIZE / 2, py + TILE_SIZE / 2);
-  }
-
-  for (const bomb of state.bombs || []) {
-    const px = pad + bomb.x * TILE_SIZE;
-    const py = pad + bomb.y * TILE_SIZE;
-    ctx.fillStyle = '#333';
-    ctx.beginPath();
-    ctx.arc(px + TILE_SIZE / 2, py + TILE_SIZE / 2, TILE_SIZE / 2 - 2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#555';
-    ctx.stroke();
-  }
-
-  for (const exp of state.explosions || []) {
-    const px = pad + exp.x * TILE_SIZE;
-    const py = exp.y * TILE_SIZE;
-    ctx.fillStyle = 'rgba(255, 150, 50, 0.8)';
-    ctx.fillRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
-  }
-
-  for (const p of state.players || []) {
-    const px = pad + p.x * TILE_SIZE;
-    const py = pad + p.y * TILE_SIZE;
-    if (!p.alive) ctx.globalAlpha = 0.4;
-    ctx.fillStyle = p.color || '#3498db';
-    ctx.beginPath();
-    ctx.arc(px + TILE_SIZE / 2, py + TILE_SIZE / 2, TILE_SIZE / 2 - 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
 }
 
 init();

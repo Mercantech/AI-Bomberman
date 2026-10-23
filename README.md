@@ -36,17 +36,21 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 
 Sæt `MQTT_ENABLED=1`, `MQTT_URL=mqtt://host.docker.internal:1883` (Windows/Mac).
 
-## Flow
+## Flow (elever — åben lobby)
 
-1. **Admin** går til `/admin.html` for at oprette et spil med PIN og bane-størrelse (9×9 til 21×21)
-2. **Spillere** går til forsiden, indtaster PIN og trykker "Join spil"
-3. Når alle er klar, trykkes "Start spil"
+1. Gå til forsiden → **Opret spil** (vælg banestørrelse) eller **Join med PIN** / vælg en åben lobby
+2. I waiting-room: se spillere, del PIN, tryk **Klar**, og **Start spil**
+3. Spil med pile/WASD + mellemrum (eller Oplà-pad)
 
-## Admin-side
+Offentlig API: `GET/POST /api/lobbies` (kun waiting-lobbies i listen).
 
-- **Opret spil**: Vælg PIN (eller lad den genereres) og bane-størrelse
-- **Aktive spil**: Se alle lobbies med PIN, spillere, status
-- **Afslut session**: Luk et spil og kick alle spillere
+## Admin / lærer-værktøj
+
+`/admin.html` er sekundært — elever behøver det ikke.
+
+- Opret spil med valgfri fast PIN
+- Se alle aktive lobbies
+- Afslut session (kick alle)
 
 ## Spectator
 

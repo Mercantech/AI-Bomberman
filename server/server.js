@@ -9,14 +9,13 @@ const path = require('path');
 const fs = require('fs');
 const { URL } = require('url');
 
-const { BombermanGame } = require('./game');
+const { BombermanGame, normalizeDirection, MIN_GRID_SIZE, MAX_GRID_SIZE } = require('./game');
 const { createControllerService } = require('./controller-service');
 const { startMqttBridge } = require('./mqtt-bridge');
 
 const PORT = process.env.PORT || 8080;
 
 const lobbies = new Map();
-const pendingClients = new Map();
 
 let playerIdCounter = 0;
 
@@ -26,6 +25,29 @@ function allocatePlayerId() {
 
 function generatePin() {
   return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+function createLobby(gridSize = 13) {
+  let pin = generatePin();
+  let attempts = 0;
+  while (lobbies.has(pin) && attempts < 20) {
+    pin = generatePin();
+    attempts++;
+  }
+  if (lobbies.has(pin)) {
+    return { error: 'Kunne ikke generere unik PIN' };
+  }
+  const size = Math.min(MAX_GRID_SIZE, Math.max(MIN_GRID_SIZE, parseInt(gridSize, 10) || 13));
+  const game = new BombermanGame(size);
+  lobbies.set(pin, {
+    game,
+    clients: new Set(),
+    spectators: new Set(),
+    controllerPlayers: new Map(),
+    controllerDevices: new Map(),
+    createdAt: Date.now(),
+  });
+  return { pin, gridSize: game.gridSize };
 }
 
 function sendTo(client, type, data) {
@@ -55,11 +77,13 @@ function handleInput(pin, playerId, input) {
   if (game.gameState !== 'playing') return;
 
   switch (input.action) {
-    case 'move':
-      if (game.movePlayer(playerId, input.direction)) {
+    case 'move': {
+      const dir = normalizeDirection(input.direction);
+      if (dir && game.movePlayer(playerId, dir)) {
         broadcastToLobby(pin, { type: 'state', data: game.getState() });
       }
       break;
+    }
     case 'bomb':
       if (game.placeBomb(playerId)) {
         broadcastToLobby(pin, { type: 'state', data: game.getState() });
@@ -68,6 +92,19 @@ function handleInput(pin, playerId, input) {
     default:
       break;
   }
+}
+
+function getOpenLobbyList() {
+  return [...lobbies.entries()]
+    .filter(([, lobby]) => lobby.game.gameState === 'waiting')
+    .map(([pin, lobby]) => ({
+      pin,
+      gridSize: lobby.game.gridSize,
+      playerCount: lobby.clients.size + (lobby.controllerPlayers?.size || 0),
+      spectatorCount: (lobby.spectators || new Set()).size,
+      gameState: lobby.game.gameState,
+      createdAt: lobby.createdAt,
+    }));
 }
 
 const controller = createControllerService({
@@ -126,23 +163,35 @@ function handleAdminApi(req, res) {
     req.on('end', () => {
       try {
         const { pin: reqPin, gridSize = 13 } = JSON.parse(body || '{}');
-        const pin = reqPin ? String(reqPin).slice(0, 8) : generatePin();
-        if (lobbies.has(pin)) {
-          res.writeHead(409);
-          res.end(JSON.stringify({ error: 'PIN eksisterer allerede', pin }));
+        if (reqPin) {
+          const pin = String(reqPin).slice(0, 8);
+          if (lobbies.has(pin)) {
+            res.writeHead(409);
+            res.end(JSON.stringify({ error: 'PIN eksisterer allerede', pin }));
+            return;
+          }
+          const size = Math.min(MAX_GRID_SIZE, Math.max(MIN_GRID_SIZE, parseInt(gridSize, 10) || 13));
+          const game = new BombermanGame(size);
+          lobbies.set(pin, {
+            game,
+            clients: new Set(),
+            spectators: new Set(),
+            controllerPlayers: new Map(),
+            controllerDevices: new Map(),
+            createdAt: Date.now(),
+          });
+          res.writeHead(201);
+          res.end(JSON.stringify({ pin, gridSize: game.gridSize }));
           return;
         }
-        const game = new BombermanGame(gridSize);
-        lobbies.set(pin, {
-          game,
-          clients: new Set(),
-          spectators: new Set(),
-          controllerPlayers: new Map(),
-          controllerDevices: new Map(),
-          createdAt: Date.now(),
-        });
+        const created = createLobby(gridSize);
+        if (created.error) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: created.error }));
+          return;
+        }
         res.writeHead(201);
-        res.end(JSON.stringify({ pin, gridSize }));
+        res.end(JSON.stringify(created));
       } catch (e) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: 'Ugyldig forespørgsel' }));
@@ -252,6 +301,45 @@ function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
+function handlePublicLobbyApi(req, res) {
+  const parsed = new URL(req.url, `http://localhost:${PORT}`);
+  const pathname = parsed.pathname;
+  res.setHeader('Content-Type', 'application/json');
+
+  if (pathname === '/api/lobbies' && req.method === 'GET') {
+    res.writeHead(200);
+    res.end(JSON.stringify({ lobbies: getOpenLobbyList() }));
+    return;
+  }
+
+  if (pathname === '/api/lobbies' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      try {
+        const { gridSize = 13 } = JSON.parse(body || '{}');
+        const created = createLobby(gridSize);
+        if (created.error) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: created.error }));
+          return;
+        }
+        res.writeHead(201);
+        res.end(JSON.stringify(created));
+      } catch (e) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Ugyldig forespørgsel' }));
+      }
+    });
+    return;
+  }
+
+  res.writeHead(404);
+  res.end(JSON.stringify({ error: 'Not found' }));
+}
+
 const server = http.createServer((req, res) => {
   setCorsHeaders(res);
 
@@ -263,6 +351,11 @@ const server = http.createServer((req, res) => {
 
   if (req.url && req.url.startsWith('/api/admin/')) {
     handleAdminApi(req, res);
+    return;
+  }
+
+  if (req.url && (req.url.split('?')[0] === '/api/lobbies' || req.url.startsWith('/api/lobbies?'))) {
+    handlePublicLobbyApi(req, res);
     return;
   }
 
@@ -297,6 +390,14 @@ const server = http.createServer((req, res) => {
     '.css': 'text/css',
     '.js': 'application/javascript',
     '.ico': 'image/x-icon',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.wav': 'audio/wav',
+    '.mp3': 'audio/mpeg',
+    '.md': 'text/markdown',
   };
 
   fs.readFile(filePath, (err, data) => {
@@ -379,8 +480,16 @@ wss.on('connection', (ws) => {
         case 'input':
           if (msg.data) handleInput(pin, ws.playerId, msg.data);
           break;
+        case 'ready':
+          if (ws.playerId && game.gameState === 'waiting') {
+            const ready = typeof msg.ready === 'boolean' ? msg.ready : undefined;
+            if (ready === undefined) game.togglePlayerReady(ws.playerId);
+            else game.setPlayerReady(ws.playerId, ready);
+            broadcastToLobby(pin, { type: 'state', data: game.getState() });
+          }
+          break;
         case 'start':
-          if (game.gameState === 'waiting') {
+          if (game.gameState === 'waiting' && game.canStart()) {
             game.startGame();
             broadcastToLobby(pin, { type: 'state', data: game.getState() });
           }
@@ -409,7 +518,12 @@ wss.on('connection', (ws) => {
           lobby.clients.delete(ws);
           if (ws.playerId) lobby.game.removePlayer(ws.playerId);
           broadcastToLobby(ws.lobbyPin, { type: 'state', data: lobby.game.getState() });
-          if (lobby.clients.size === 0 && (!lobby.spectators || lobby.spectators.size === 0)) {
+          const hasControllers = lobby.controllerPlayers && lobby.controllerPlayers.size > 0;
+          if (
+            lobby.clients.size === 0 &&
+            (!lobby.spectators || lobby.spectators.size === 0) &&
+            !hasControllers
+          ) {
             if (lobby.game.tickInterval) clearInterval(lobby.game.tickInterval);
             lobbies.delete(ws.lobbyPin);
           }
@@ -442,6 +556,22 @@ setInterval(() => {
     }
   }
 }, 50);
+
+// Fjern tomme waiting-lobbies efter 15 min (elever der opretter uden at joine)
+setInterval(() => {
+  const maxAge = 15 * 60 * 1000;
+  const now = Date.now();
+  for (const [pin, lobby] of lobbies) {
+    if (lobby.game.gameState !== 'waiting') continue;
+    const empty =
+      lobby.clients.size === 0 &&
+      (!lobby.spectators || lobby.spectators.size === 0) &&
+      (!lobby.controllerPlayers || lobby.controllerPlayers.size === 0);
+    if (empty && now - lobby.createdAt > maxAge) {
+      lobbies.delete(pin);
+    }
+  }
+}, 60000);
 
 startMqttBridge(controller);
 
