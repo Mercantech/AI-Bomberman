@@ -36,10 +36,15 @@ function init() {
   updateMuteButtons();
 
   const pinInput = document.getElementById('pin-input');
+  const createPin = document.getElementById('create-pin');
   const urlPin = new URLSearchParams(window.location.search).get('pin');
   if (urlPin && pinInput) {
     pinInput.value = urlPin.trim();
   }
+  try {
+    const lastPin = localStorage.getItem('bm_last_pin');
+    if (lastPin && createPin && !createPin.value) createPin.value = lastPin;
+  } catch (_) {}
 
   document.getElementById('btn-join')?.addEventListener('click', () => {
     Sfx?.click();
@@ -139,15 +144,18 @@ async function createLobby() {
   const err = document.getElementById('join-error');
   err.classList.add('hidden');
   const gridSize = document.getElementById('create-grid')?.value || 13;
+  const customPin = document.getElementById('create-pin')?.value.trim() || '';
   const name =
     document.getElementById('create-name')?.value.trim() ||
     document.getElementById('name-input')?.value.trim() ||
     '';
   try {
+    const body = { gridSize: parseInt(gridSize, 10) };
+    if (customPin) body.pin = customPin;
     const res = await fetch(`${apiBase()}/api/lobbies`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ gridSize: parseInt(gridSize, 10) }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Kunne ikke oprette lobby');
@@ -159,6 +167,9 @@ async function createLobby() {
       const ni = document.getElementById('name-input');
       if (ni) ni.value = name;
     }
+    try {
+      localStorage.setItem('bm_last_pin', currentPin);
+    } catch (_) {}
     connect();
   } catch (e) {
     err.textContent = e.message || 'Fejl ved oprettelse';

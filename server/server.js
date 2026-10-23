@@ -27,15 +27,26 @@ function generatePin() {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
 
-function createLobby(gridSize = 13) {
-  let pin = generatePin();
-  let attempts = 0;
-  while (lobbies.has(pin) && attempts < 20) {
+function createLobby(gridSize = 13, requestedPin) {
+  let pin;
+  if (requestedPin) {
+    pin = String(requestedPin).trim().slice(0, 8);
+    if (!pin) {
+      return { error: 'Ugyldig PIN' };
+    }
+    if (lobbies.has(pin)) {
+      return { error: 'PIN er allerede i brug', pin, conflict: true };
+    }
+  } else {
     pin = generatePin();
-    attempts++;
-  }
-  if (lobbies.has(pin)) {
-    return { error: 'Kunne ikke generere unik PIN' };
+    let attempts = 0;
+    while (lobbies.has(pin) && attempts < 20) {
+      pin = generatePin();
+      attempts++;
+    }
+    if (lobbies.has(pin)) {
+      return { error: 'Kunne ikke generere unik PIN' };
+    }
   }
   const size = Math.min(MAX_GRID_SIZE, Math.max(MIN_GRID_SIZE, parseInt(gridSize, 10) || 13));
   const game = new BombermanGame(size);
@@ -319,11 +330,11 @@ function handlePublicLobbyApi(req, res) {
     });
     req.on('end', () => {
       try {
-        const { gridSize = 13 } = JSON.parse(body || '{}');
-        const created = createLobby(gridSize);
+        const { gridSize = 13, pin: reqPin } = JSON.parse(body || '{}');
+        const created = createLobby(gridSize, reqPin || undefined);
         if (created.error) {
-          res.writeHead(500);
-          res.end(JSON.stringify({ error: created.error }));
+          res.writeHead(created.conflict ? 409 : 400);
+          res.end(JSON.stringify({ error: created.error, pin: created.pin }));
           return;
         }
         res.writeHead(201);

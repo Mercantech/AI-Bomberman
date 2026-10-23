@@ -42,6 +42,8 @@
           <p class="panel-hint">Start et rum — del PIN med klassen</p>
           <label class="field-label" for="create-name">Dit navn</label>
           <input type="text" id="create-name" placeholder="Navn" maxlength="20" autocomplete="nickname">
+          <label class="field-label" for="create-pin">PIN (valgfri — fx den i Arduino)</label>
+          <input type="text" id="create-pin" placeholder="Tom = tilfældig" maxlength="8" autocomplete="off" inputmode="numeric">
           <label class="field-label" for="create-grid">Banestørrelse</label>
           <select id="create-grid">
             <option value="9">9×9 — hurtig</option>
@@ -148,6 +150,6 @@
 
   <script src="sfx.js?v=1"></script>
   <script src="render.js?v=1"></script>
-  <script src="game-client.js?v=5"></script>
+  <script src="game-client.js?v=6"></script>
 </body>
 </html>
