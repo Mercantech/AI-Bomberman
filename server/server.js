@@ -9,7 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const { URL } = require('url');
 
-const { BombermanGame, normalizeDirection, MIN_GRID_SIZE, MAX_GRID_SIZE } = require('./game');
+const { BombermanGame, normalizeDirection, MIN_GRID_SIZE, MAX_GRID_SIZE, MAX_PLAYERS } = require('./game');
 const { createControllerService } = require('./controller-service');
 const { startMqttBridge } = require('./mqtt-bridge');
 
@@ -471,12 +471,22 @@ wss.on('connection', (ws) => {
             sendTo(ws, 'error', { message: 'Ugyldig eller ukendt PIN' });
             return;
           }
+          if (lobby.game.players.size >= MAX_PLAYERS) {
+            sendTo(ws, 'error', { message: `Lobby er fuld (max ${MAX_PLAYERS} spillere)` });
+            return;
+          }
           const playerId = allocatePlayerId();
           ws.playerId = playerId;
           ws.lobbyPin = pin;
           ws.isSpectator = false;
           const name = msg.name ? String(msg.name).trim().slice(0, 20) : null;
-          lobby.game.addPlayer(playerId, name || `Player ${playerIdCounter}`);
+          const added = lobby.game.addPlayer(playerId, name || `Player ${playerIdCounter}`);
+          if (!added) {
+            ws.playerId = null;
+            ws.lobbyPin = null;
+            sendTo(ws, 'error', { message: `Lobby er fuld (max ${MAX_PLAYERS} spillere)` });
+            return;
+          }
           lobby.clients.add(ws);
 
           sendTo(ws, 'joined', { playerId, pin, state: lobby.game.getState() });

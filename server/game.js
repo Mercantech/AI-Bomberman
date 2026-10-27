@@ -6,6 +6,7 @@
 const DEFAULT_GRID_SIZE = 13;
 const MIN_GRID_SIZE = 9;
 const MAX_GRID_SIZE = 21;
+const MAX_PLAYERS = 4;
 const TICK_RATE = 100; // ms
 const BRICK_DENSITY = 0.58;
 
@@ -187,6 +188,7 @@ class BombermanGame {
   }
 
   addPlayer(id, name = 'Player') {
+    if (this.players.size >= MAX_PLAYERS) return null;
     const spawns = this.getCornerSpawns();
     const used = [...this.players.values()].map(p => `${p.x},${p.y}`);
     const spawn = spawns.find(([x, y]) => !used.includes(`${x},${y}`)) || spawns[0];
@@ -213,6 +215,7 @@ class BombermanGame {
     if (isFirst || !this.hostId) {
       this.hostId = id;
     }
+    return this.players.get(id);
   }
 
   setPlayerReady(id, ready) {
@@ -479,6 +482,7 @@ module.exports = {
   DEFAULT_GRID_SIZE,
   MIN_GRID_SIZE,
   MAX_GRID_SIZE,
+  MAX_PLAYERS,
   CELL,
   POWERUP,
   TICK_RATE,

@@ -2,7 +2,7 @@
  * Fælles controller-logik for HTTP og MQTT (Oplà).
  */
 
-const { normalizeDirection } = require('./game');
+const { normalizeDirection, MAX_PLAYERS } = require('./game');
 
 function createControllerService(deps) {
   const { lobbies, allocatePlayerId, broadcastToLobby, broadcastState, applyGameInput } = deps;
@@ -35,9 +35,16 @@ function createControllerService(deps) {
       lobby.controllerDevices.delete(devKey);
     }
 
+    if (lobby.game.players.size >= MAX_PLAYERS) {
+      return { status: 409, body: { ok: false, error: `Lobby er fuld (max ${MAX_PLAYERS} spillere)` } };
+    }
+
     const playerId = allocatePlayerId();
     const displayName = name ? String(name).trim().slice(0, 20) : `Arduino ${playerId.replace('player_', '')}`;
-    lobby.game.addPlayer(playerId, displayName);
+    const added = lobby.game.addPlayer(playerId, displayName);
+    if (!added) {
+      return { status: 409, body: { ok: false, error: `Lobby er fuld (max ${MAX_PLAYERS} spillere)` } };
+    }
     const player = lobby.game.players.get(playerId);
     if (player) player.isController = true;
     lobby.controllerPlayers.set(playerId, {
