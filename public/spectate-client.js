@@ -3,6 +3,7 @@
  */
 
 const Render = window.BombermanRender;
+const PlayerUi = window.BombermanPlayerUi;
 
 let ws = null;
 let currentPin = null;
@@ -10,7 +11,6 @@ let state = null;
 let canvas, ctx;
 let intentionalLeave = false;
 let stateReceivedAt = 0;
-let lastStatsKey = '';
 let spectating = false;
 let startPending = false;
 
@@ -32,10 +32,12 @@ function init() {
 
   document.getElementById('btn-watch').addEventListener('click', trySpectate);
   document.getElementById('btn-start').addEventListener('click', startGame);
+  document.getElementById('btn-reset').addEventListener('click', resetGame);
   pinInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') trySpectate();
   });
 
+  PlayerUi.setupFullscreen('spectate-view');
   requestAnimationFrame(renderLoop);
 }
 
@@ -158,12 +160,25 @@ function startGame() {
   ws.send(JSON.stringify({ type: 'start' }));
 }
 
+function resetGame() {
+  if (!spectating || ws?.readyState !== WebSocket.OPEN || startPending || state?.gameState !== 'ended') return;
+  startPending = true;
+  updateControls();
+  ws.send(JSON.stringify({ type: 'reset' }));
+}
+
 function updateControls() {
+  if (state) {
+    PlayerUi.updateMatchInfo(state, null);
+    PlayerUi.renderRoster(document.getElementById('stats-panel'), state, null);
+    document.getElementById('spectate-info').textContent = `PIN: ${currentPin} · ${PlayerUi.modeLabel(state)} · op til ${state.maxPlayers || 4} spillere`;
+  }
   document.getElementById('btn-start').disabled = !canStartGame();
+  document.getElementById('btn-reset').disabled = !spectating || ws?.readyState !== WebSocket.OPEN || startPending || state?.gameState !== 'ended';
   const hint = document.getElementById('spectate-start-hint');
   const text = !spectating || ws?.readyState !== WebSocket.OPEN ? 'Venter på forbindelse…'
     : state?.gameState === 'playing' ? 'Spillet er i gang.'
-      : state?.gameState === 'ended' ? 'Spillet er slut.'
+      : state?.gameState === 'ended' ? 'Spillet er slut. Vælg «Nyt spil» for en ny runde.'
         : startPending ? 'Starter spillet…'
           : !state?.players?.length ? 'Venter på mindst én spiller.'
             : 'Du kan starte spillet uden selv at deltage.';
@@ -178,32 +193,6 @@ function updateStatus(text) {
   }
 }
 
-function updateStats() {
-  const panel = document.getElementById('stats-panel');
-  if (!panel || !state?.players?.length) return;
-  const key = state.players
-    .map((p) => `${p.id}:${p.alive}:${p.bombs}:${p.maxBombs}:${p.flameLength}:${p.kills}`)
-    .join('|');
-  if (key === lastStatsKey) return;
-  lastStatsKey = key;
-  panel.innerHTML = state.players
-    .map(
-      (p) => `
-      <div class="stat-card ${p.alive ? '' : 'dead'}">
-        <div class="stat-avatar" style="background:${p.color}"></div>
-        <div class="stat-details">
-          <span class="stat-name">${p.name || p.id}</span>
-          <div class="stat-row">
-            <span><span class="stat-icon">HP</span>${p.alive ? 'OK' : 'OUT'}</span>
-            <span><span class="stat-icon">B</span>${p.bombs}/${p.maxBombs}</span>
-            <span><span class="stat-icon">F</span>${p.flameLength}</span>
-            <span><span class="stat-icon">K</span>${p.kills || 0}</span>
-          </div>
-        </div>
-      </div>`
-    )
-    .join('');
-}
 
 function renderLoop(now) {
   now = now || performance.now();
@@ -217,7 +206,6 @@ function renderLoop(now) {
       };
     }
     Render.drawFrame(ctx, canvas, rs, now, {});
-    updateStats();
   }
   requestAnimationFrame(renderLoop);
 }

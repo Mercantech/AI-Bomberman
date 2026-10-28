@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
   <link rel="stylesheet" href="admin.css?v=3">
   <link rel="stylesheet" href="arena-nav.css?v=2">
 </head>
@@ -40,6 +40,10 @@
           <input type="text" id="pin-input" placeholder="fx 1234" maxlength="8" pattern="[0-9]*">
         </div>
         <div class="form-row">
+          <label for="game-mode">Spiltype</label>
+          <select id="game-mode"><option value="classic">Classic · op til 4</option><option value="arena">Klassekamp · op til 24</option></select>
+        </div>
+        <div class="form-row">
           <label for="grid-size">Bane størrelse</label>
           <select id="grid-size">
             <option value="9">9×9 (lille)</option>
@@ -49,6 +53,7 @@
             <option value="17">17×17</option>
             <option value="19">19×19</option>
             <option value="21">21×21 (stor)</option>
+            <option value="31" hidden>31×31 (klassekamp)</option>
           </select>
         </div>
         <button type="submit">Opret spil</button>
@@ -63,6 +68,6 @@
     </section>
   </div>
 
-  <script src="admin-client.js"></script>
+  <script src="admin-client.js?v=2"></script>
 </body>
 </html>

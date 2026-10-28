@@ -38,11 +38,34 @@ Sæt `MQTT_ENABLED=1`, `MQTT_URL=mqtt://host.docker.internal:1883` (Windows/Mac)
 
 ## Flow (elever — åben lobby)
 
-1. Gå til forsiden → **Opret spil** (vælg banestørrelse) eller **Join med PIN** / vælg en åben lobby
+1. Gå til forsiden → **Opret spil** (vælg Classic eller Klassekamp) eller **Join med PIN** / vælg en åben lobby
 2. I waiting-room: se spillere, del PIN, tryk **Klar**, og **Start spil**
 3. Spil med pile/WASD + mellemrum (eller Oplà-pad)
 
 Offentlig API: `GET/POST /api/lobbies` (kun waiting-lobbies i listen).
+
+## Klassekamp — op til 24 spillere
+
+Vælg **Klassekamp · op til 24 spillere** ved oprettelse. Serveren vælger automatisk en **31×31-bane** med 24 adskilte startpladser og flugtvej fra den første bombe. **Classic** bevarer de normale 4 spillerpladser og banestørrelser.
+
+- Hver spiller får et fast **nummer 1–24**, en farve og et symbol (cirkel, rombe eller trekant). Samme identitet ses på figuren, i lobbyen og i spilleroversigten. Nummeret bevares ved nyt spil.
+- Din egen browserspiller har en gul markering og **DU** over figuren.
+- Vælg **Opret som tilskuer / fælles skærm**, hvis alle 24 pladser skal være ledige til Arduinoer eller andre spillere. Tilskueren kan starte kampen og vælge **Nyt spil**, når runden er slut.
+- Brug **Fuldskærm** på en fælles skærm eller projektor. På små skærme placeres spilleroversigten under banen.
+- Nye deltagere joiner klassekampen før start eller mellem runder. En allerede tilmeldt controller kan genforbinde med samme `deviceId` under kampen.
+- HTTP- og MQTT-controllerprotokollen er uændret. Arenaens spilopdateringer samles til 10 gange pr. sekund; input behandles løbende.
+
+Opret via `POST /api/lobbies` eller `POST /api/admin/lobbies` med `{ "mode": "arena", "pin": "1234" }`. Udeladt `mode` giver `classic`. Svar og lobbylister indeholder `mode` og `maxPlayers`; spillere i `state` har `number`, `color` og `symbol`.
+
+### Test
+
+```bash
+cd server
+npm ci
+npm test
+```
+
+Testene dækker 24 unikke og sikre startpladser, faste identiteter, kapacitetsgrænser, reset samt en kamp med 23 simulerede Arduinoer og én browser via HTTP/WebSocket, startet af en tilskuer.
 
 ## Admin / lærer-værktøj
 

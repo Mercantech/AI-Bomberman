@@ -9,11 +9,11 @@ function getBasePath() {
 
 const API_BASE = getBasePath();
 
-async function createLobby(pin, gridSize) {
+async function createLobby(pin, gridSize, mode) {
   const res = await fetch(`${API_BASE}/api/admin/lobbies`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin: pin || undefined, gridSize: parseInt(gridSize, 10) }),
+    body: JSON.stringify({ pin: pin || undefined, gridSize: parseInt(gridSize, 10), mode }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Fejl');
@@ -47,8 +47,8 @@ function init() {
 
     resultEl.classList.add('hidden');
     try {
-      const data = await createLobby(pin || undefined, gridSize);
-      resultEl.textContent = `Spil oprettet! PIN: ${data.pin} (Bane: ${data.gridSize}×${data.gridSize})`;
+      const data = await createLobby(pin || undefined, gridSize, document.getElementById('game-mode').value);
+      resultEl.textContent = `Spil oprettet! PIN: ${data.pin} (${data.mode === 'arena' ? 'Klassekamp' : 'Classic'} · ${data.maxPlayers || 4} pladser · ${data.gridSize}×${data.gridSize})`;
       resultEl.className = 'result success';
       resultEl.classList.remove('hidden');
       pinInput.value = '';
@@ -60,6 +60,12 @@ function init() {
     }
   });
 
+  document.getElementById('game-mode').addEventListener('change', (event) => {
+    const arena = event.target.value === 'arena';
+    const grid = document.getElementById('grid-size');
+    grid.disabled = arena;
+    grid.value = arena ? '31' : '13';
+  });
   refreshLobbies();
   setInterval(refreshLobbies, 3000);
 }
@@ -80,7 +86,7 @@ async function refreshLobbies() {
         <div class="lobby-info">
           <span class="pin">PIN: ${lobby.pin}</span>
           <span>Bane: ${lobby.gridSize}×${lobby.gridSize}</span>
-          <span>Spillere: ${lobby.playerCount}</span>
+          <span>Spillere: ${lobby.playerCount}/${lobby.maxPlayers || 4} · ${lobby.mode === 'arena' ? 'Klassekamp' : 'Classic'}</span>
           <span>Status: ${lobby.gameState === 'playing' ? 'I gang' : lobby.gameState === 'ended' ? 'Slut' : 'Venter'}</span>
         </div>
         <div class="lobby-actions">

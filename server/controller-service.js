@@ -2,7 +2,7 @@
  * Fælles controller-logik for HTTP og MQTT (Oplà).
  */
 
-const { normalizeDirection, MAX_PLAYERS } = require('./game');
+const { normalizeDirection } = require('./game');
 
 function createControllerService(deps) {
   const { lobbies, allocatePlayerId, broadcastToLobby, broadcastState, applyGameInput } = deps;
@@ -29,21 +29,25 @@ function createControllerService(deps) {
         console.log('[CONTROLLER JOIN] Reconnect deviceId=%s playerId=%s', devKey, existingId);
         return {
           status: 200,
-          body: { ok: true, playerId: existingId, name: meta.name, reconnected: true },
+          body: { ok: true, playerId: existingId, name: meta.name, number: lobby.game.players.get(existingId).number, reconnected: true },
         };
       }
       lobby.controllerDevices.delete(devKey);
     }
 
-    if (lobby.game.players.size >= MAX_PLAYERS) {
-      return { status: 409, body: { ok: false, error: `Lobby er fuld (max ${MAX_PLAYERS} spillere)` } };
+    if (lobby.game.mode === 'arena' && lobby.game.gameState === 'playing') {
+      return { status: 409, body: { ok: false, error: 'Klassekampen er i gang. Join mellem kampene.' } };
+    }
+
+    if (lobby.game.players.size >= lobby.game.maxPlayers) {
+      return { status: 409, body: { ok: false, error: `Lobby er fuld (max ${lobby.game.maxPlayers} spillere)` } };
     }
 
     const playerId = allocatePlayerId();
     const displayName = name ? String(name).trim().slice(0, 20) : `Arduino ${playerId.replace('player_', '')}`;
     const added = lobby.game.addPlayer(playerId, displayName);
     if (!added) {
-      return { status: 409, body: { ok: false, error: `Lobby er fuld (max ${MAX_PLAYERS} spillere)` } };
+      return { status: 409, body: { ok: false, error: `Lobby er fuld (max ${lobby.game.maxPlayers} spillere)` } };
     }
     const player = lobby.game.players.get(playerId);
     if (player) player.isController = true;
@@ -55,7 +59,7 @@ function createControllerService(deps) {
 
     pushState(pinStr);
     console.log('[CONTROLLER JOIN] OK playerId=%s name=%s pin=%s', playerId, displayName, pinStr);
-    return { status: 200, body: { ok: true, playerId, name: displayName } };
+    return { status: 200, body: { ok: true, playerId, name: displayName, number: added.number } };
   }
 
   function controllerHeartbeat(pinStr, playerId) {

@@ -109,14 +109,28 @@
     proceduralAtlas = c;
   }
 
-  function fitTileSize(gridSize) {
-    const max = Math.min(window.innerWidth - 48, window.innerHeight - 280, 720);
-    const raw = Math.floor((max - PAD * 2) / gridSize);
-    return Math.max(18, Math.min(48, raw));
+  function fitTileSize(gridSize, canvas) {
+    const fullscreenElement = document.fullscreenElement;
+    const fullscreen = !!(canvas && fullscreenElement?.contains(canvas));
+    const boardOnlyFullscreen = fullscreen && (fullscreenElement === canvas || fullscreenElement === canvas.parentElement);
+    const viewportWidth = Math.max(1, window.innerWidth - (fullscreen ? 32 : 64));
+    let availableWidth = viewportWidth;
+    // The board can share a row with the roster. Measure its column, not the
+    // canvas wrapper, whose intrinsic width can still reflect the previous map.
+    const column = canvas?.closest('.board-column') || canvas?.parentElement?.parentElement;
+    if (!boardOnlyFullscreen && column?.clientWidth) {
+      const style = getComputedStyle(column);
+      const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+      availableWidth = Math.min(availableWidth, Math.max(1, column.clientWidth - padding - 24));
+    }
+    const availableHeight = Math.max(160, window.innerHeight - (boardOnlyFullscreen ? 48 : fullscreen ? 180 : 280));
+    const max = Math.min(availableWidth, availableHeight, fullscreen ? Infinity : 900);
+    // Large arenas must fit small screens too; the old 18px floor overflowed.
+    return Math.max(1, Math.min(48, Math.floor((max - PAD * 2) / gridSize)));
   }
 
   function resizeCanvas(canvas, gridSize) {
-    const ts = fitTileSize(gridSize);
+    const ts = fitTileSize(gridSize, canvas);
     const size = gridSize * ts + PAD * 2;
     if (canvas.width !== size || canvas.height !== size) {
       canvas.width = size;
@@ -264,6 +278,67 @@
     ctx.drawImage(img, dx, dy, dw, dh);
   }
 
+  function drawPlayerBadge(ctx, p, number, centerX, centerY, ts, compact = false) {
+    const label = String(number);
+    const fontSize = Math.max(7, Math.min(compact ? 10 : 13, Math.floor(ts * 0.46)));
+    ctx.save();
+    ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const textWidth = ctx.measureText(label).width;
+    let halfW = (textWidth + 7) / 2;
+    let halfH = (fontSize + 5) / 2;
+    let textY = centerY;
+    ctx.beginPath();
+    if (p.symbol === 'diamond') {
+      halfW += 4;
+      halfH += 3;
+      ctx.moveTo(centerX, centerY - halfH);
+      ctx.lineTo(centerX + halfW, centerY);
+      ctx.lineTo(centerX, centerY + halfH);
+      ctx.lineTo(centerX - halfW, centerY);
+      ctx.closePath();
+    } else if (p.symbol === 'triangle') {
+      halfW += 5;
+      halfH += 3;
+      ctx.moveTo(centerX, centerY - halfH);
+      ctx.lineTo(centerX + halfW, centerY + halfH);
+      ctx.lineTo(centerX - halfW, centerY + halfH);
+      ctx.closePath();
+      textY += Math.max(1, fontSize * 0.22);
+    } else {
+      ctx.ellipse(centerX, centerY, halfW, halfH, 0, 0, Math.PI * 2);
+    }
+    ctx.fillStyle = '#07140c';
+    ctx.fill();
+    ctx.strokeStyle = p.color || '#fff';
+    ctx.lineWidth = compact ? 1.5 : 2;
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, centerX, textY);
+    ctx.restore();
+  }
+
+  function drawLocalMarker(ctx, px, py, ts) {
+    ctx.save();
+    ctx.strokeStyle = '#ffe664';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px + 1, py + 1, Math.max(1, ts - 2), Math.max(1, ts - 2));
+    if (ts >= 14) {
+      const fontSize = Math.max(7, Math.min(10, Math.floor(ts * 0.38)));
+      ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const width = ctx.measureText('DU').width + 6;
+      const height = fontSize + 3;
+      ctx.fillStyle = '#ffe664';
+      ctx.fillRect(px + (ts - width) / 2, py + ts - 2, width, height);
+      ctx.fillStyle = '#07140c';
+      ctx.fillText('DU', px + ts / 2, py + ts - 2 + height / 2);
+    }
+    ctx.restore();
+  }
+
   function drawFrame(ctx, canvas, state, now, opts) {
     if (!state || !ctx) return;
     loadImages();
@@ -328,16 +403,20 @@
       } else {
         ctx.fillStyle = p.color || '#3498db';
         ctx.beginPath();
-        ctx.arc(px + ts / 2, py + ts / 2, ts / 2 - 4, 0, Math.PI * 2);
+        ctx.arc(px + ts / 2, py + ts / 2, Math.max(1, ts / 2 - 3), 0, Math.PI * 2);
         ctx.fill();
-      }
-      if (highlightId && p.id === highlightId && p.alive) {
-        ctx.strokeStyle = 'rgba(255, 230, 100, 0.85)';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(px + 1, py + 1, ts - 2, ts - 2);
       }
       ctx.globalAlpha = 1;
     }
+    // Draw identities last so another player's sprite cannot cover a number.
+    (state.players || []).forEach((p, index) => {
+      if (!p.alive) return;
+      const L = lerpMap[p.id];
+      const px = PAD + (L ? L.x : p.x) * ts;
+      const py = PAD + (L ? L.y : p.y) * ts;
+      if (highlightId && p.id === highlightId) drawLocalMarker(ctx, px, py, ts);
+      drawPlayerBadge(ctx, p, p.number || index + 1, px + ts / 2, py - ts * 0.12, ts);
+    });
   }
 
   function drawMiniMap(ctx, canvas, state) {
@@ -367,10 +446,17 @@
         }
       }
     }
-    for (const p of state.players || []) {
+    (state.players || []).forEach((p, index) => {
       ctx.fillStyle = p.color || '#fff';
-      ctx.fillRect(ox + p.x * ts, oy + p.y * ts, ts, ts);
-    }
+      const px = ox + p.x * ts;
+      const py = oy + p.y * ts;
+      ctx.fillRect(px, py, ts, ts);
+      // Lobby spawn sites are separated, so numbered markers stay legible even
+      // when the 31x31 preview uses only a few pixels per map cell.
+      if (p.alive && (state.gameState === 'waiting' || ts >= 12)) {
+        drawPlayerBadge(ctx, p, p.number || index + 1, px + ts / 2, py + ts / 2, Math.max(16, ts), true);
+      }
+    });
   }
 
   function invalidateGridCache() {

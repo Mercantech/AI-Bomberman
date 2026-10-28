@@ -7,6 +7,10 @@ const DEFAULT_GRID_SIZE = 13;
 const MIN_GRID_SIZE = 9;
 const MAX_GRID_SIZE = 21;
 const MAX_PLAYERS = 4;
+const ARENA_GRID_SIZE = 31;
+const ARENA_MAX_PLAYERS = 24;
+const PLAYER_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#ec5bad', '#d5e03e'];
+const PLAYER_SYMBOLS = ['circle', 'diamond', 'triangle'];
 const TICK_RATE = 100; // ms
 const BRICK_DENSITY = 0.58;
 
@@ -48,8 +52,12 @@ function weightedPowerupType() {
 }
 
 class BombermanGame {
-  constructor(gridSize = DEFAULT_GRID_SIZE) {
-    this.gridSize = Math.min(MAX_GRID_SIZE, Math.max(MIN_GRID_SIZE, gridSize));
+  constructor(gridSize = DEFAULT_GRID_SIZE, mode = 'classic') {
+    this.mode = mode === 'arena' ? 'arena' : 'classic';
+    this.maxPlayers = this.mode === 'arena' ? ARENA_MAX_PLAYERS : MAX_PLAYERS;
+    const requestedSize = parseInt(gridSize, 10) || DEFAULT_GRID_SIZE;
+    this.gridSize = this.mode === 'arena' ? ARENA_GRID_SIZE
+      : Math.min(MAX_GRID_SIZE, Math.max(MIN_GRID_SIZE, requestedSize));
     if (this.gridSize % 2 === 0) this.gridSize++; // Skal være ulige
     this.grid = [];
     this.players = new Map();
@@ -69,7 +77,45 @@ class BombermanGame {
     return [[1, 1], [gs - 2, 1], [1, gs - 2], [gs - 2, gs - 2]];
   }
 
+  getSpawnPoints() {
+    if (this.mode !== 'arena') return this.getCornerSpawns();
+    // 24 positions, at least six cells apart; the centre is not a spawn.
+    const axis = [1, 7, 15, 23, 29];
+    const spawns = this.getCornerSpawns();
+    const candidates = axis.flatMap(y => axis.filter(x => x !== 15 || y !== 15).map(x => [x, y]))
+      .filter(([x, y]) => !spawns.some(([sx, sy]) => sx === x && sy === y));
+    // Spread smaller class matches across the board rather than filling one edge first.
+    while (candidates.length) {
+      let bestIndex = 0;
+      let bestDistance = -1;
+      candidates.forEach(([x, y], index) => {
+        const distance = Math.min(...spawns.map(([sx, sy]) => Math.abs(sx - x) + Math.abs(sy - y)));
+        if (distance > bestDistance) { bestDistance = distance; bestIndex = index; }
+      });
+      spawns.push(candidates.splice(bestIndex, 1)[0]);
+    }
+    return spawns;
+  }
+
   getSpawnClearCells() {
+    if (this.mode === 'arena') {
+      const cells = new Map();
+      const add = (x, y) => {
+        if (x > 0 && y > 0 && x < this.gridSize - 1 && y < this.gridSize - 1 &&
+            !(x % 2 === 0 && y % 2 === 0)) cells.set(`${x},${y}`, [x, y]);
+      };
+      for (const [x, y] of this.getSpawnPoints()) {
+        add(x, y);
+        for (const [dx, dy] of Object.values(DIR)) {
+          add(x + dx, y + dy);
+          add(x + 2 * dx, y + 2 * dy);
+          // A turn after two steps lets every player escape their first radius-2 bomb.
+          add(x + 2 * dx - dy, y + 2 * dy + dx);
+          add(x + 2 * dx + dy, y + 2 * dy - dx);
+        }
+      }
+      return [...cells.values()];
+    }
     const gs = this.gridSize;
     return [
       [1, 1], [1, 2], [2, 1], [1, 3], [3, 1],
@@ -82,6 +128,7 @@ class BombermanGame {
   initGrid() {
     const gs = this.gridSize;
     this.grid = [];
+    const spawnCells = new Set(this.getSpawnClearCells().map(([x, y]) => `${x},${y}`));
     for (let y = 0; y < gs; y++) {
       this.grid[y] = [];
       for (let x = 0; x < gs; x++) {
@@ -89,7 +136,7 @@ class BombermanGame {
           this.grid[y][x] = CELL.SOLID;
         } else if (x % 2 === 0 && y % 2 === 0) {
           this.grid[y][x] = CELL.SOLID;
-        } else if (this.isSpawnPoint(x, y)) {
+        } else if (spawnCells.has(`${x},${y}`)) {
           this.grid[y][x] = CELL.EMPTY;
         } else {
           this.grid[y][x] = Math.random() < BRICK_DENSITY ? CELL.BRICK : CELL.EMPTY;
@@ -118,7 +165,7 @@ class BombermanGame {
 
   /** Flood-fill through EMPTY + BRICK; carve bricks if spawns cannot reach each other. */
   ensureSpawnConnectivity() {
-    const spawns = this.getCornerSpawns();
+    const spawns = this.getSpawnPoints();
     const canPass = (x, y) => {
       const c = this.grid[y]?.[x];
       return c === CELL.EMPTY || c === CELL.BRICK;
@@ -188,15 +235,27 @@ class BombermanGame {
   }
 
   addPlayer(id, name = 'Player') {
-    if (this.players.size >= MAX_PLAYERS) return null;
-    const spawns = this.getCornerSpawns();
-    const used = [...this.players.values()].map(p => `${p.x},${p.y}`);
-    const spawn = spawns.find(([x, y]) => !used.includes(`${x},${y}`)) || spawns[0];
+    if (this.players.has(id)) return this.players.get(id);
+    if (this.players.size >= this.maxPlayers) return null;
+    // Arena participants join between rounds so no one spawns into a live blast.
+    if (this.mode === 'arena' && this.gameState === 'playing') return null;
+    const spawns = this.getSpawnPoints();
+    const usedNumbers = new Set([...this.players.values()].map(p => p.number));
+    let number = 1;
+    while (usedNumbers.has(number)) number++;
+    let spawn = spawns[number - 1];
+    if (this.gameState === 'playing') {
+      // Preserve Classic's existing ability to join a running match.
+      const used = [...this.players.values()].map(p => `${p.x},${p.y}`);
+      spawn = spawns.find(([x, y]) => !used.includes(`${x},${y}`)) || spawns[0];
+    }
     const isFirst = this.players.size === 0;
 
     this.players.set(id, {
       id,
       name,
+      number,
+      symbol: PLAYER_SYMBOLS[Math.floor((number - 1) / PLAYER_COLORS.length)],
       x: spawn[0],
       y: spawn[1],
       bombs: 1,
@@ -206,7 +265,7 @@ class BombermanGame {
       alive: true,
       kills: 0,
       lastMove: 0,
-      color: this.getPlayerColor(this.players.size),
+      color: this.getPlayerColor(number - 1),
       facing: 'DOWN',
       ready: false,
       isController: false,
@@ -233,8 +292,7 @@ class BombermanGame {
   }
 
   getPlayerColor(index) {
-    const colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12'];
-    return colors[index % colors.length];
+    return PLAYER_COLORS[index % PLAYER_COLORS.length];
   }
 
   removePlayer(id) {
@@ -256,11 +314,10 @@ class BombermanGame {
     this.powerups = [];
     this.winnerId = null;
     this.initGrid();
-    const spawns = this.getCornerSpawns();
-    let i = 0;
+    const spawns = this.getSpawnPoints();
     for (const [, p] of this.players) {
-      p.x = spawns[i][0];
-      p.y = spawns[i][1];
+      p.x = spawns[p.number - 1][0];
+      p.y = spawns[p.number - 1][1];
       p.alive = true;
       p.maxBombs = 1;
       p.flameLength = 2;
@@ -269,7 +326,7 @@ class BombermanGame {
       p.kills = 0;
       p.facing = 'DOWN';
       p.ready = false;
-      i = (i + 1) % spawns.length;
+      p.lastMove = 0;
     }
     this.tickInterval = setInterval(() => this.tick(), TICK_RATE);
     return true;
@@ -444,6 +501,8 @@ class BombermanGame {
       gameState: this.gameState,
       winnerId: this.winnerId,
       gridSize: this.gridSize,
+      mode: this.mode,
+      maxPlayers: this.maxPlayers,
       theme: this.theme,
       hostId: this.hostId,
     };
@@ -460,9 +519,9 @@ class BombermanGame {
     this.powerups = [];
     this.winnerId = null;
     this.initGrid();
-    const spawns = this.getCornerSpawns();
-    for (const [id, p] of this.players) {
-      const idx = [...this.players.keys()].indexOf(id) % 4;
+    const spawns = this.getSpawnPoints();
+    for (const [, p] of this.players) {
+      const idx = p.number - 1;
       p.x = spawns[idx][0];
       p.y = spawns[idx][1];
       p.alive = true;
@@ -473,6 +532,7 @@ class BombermanGame {
       p.kills = 0;
       p.facing = 'DOWN';
       p.ready = false;
+      p.lastMove = 0;
     }
   }
 }
@@ -483,6 +543,8 @@ module.exports = {
   MIN_GRID_SIZE,
   MAX_GRID_SIZE,
   MAX_PLAYERS,
+  ARENA_GRID_SIZE,
+  ARENA_MAX_PLAYERS,
   CELL,
   POWERUP,
   TICK_RATE,

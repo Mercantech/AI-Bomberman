@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
   <link rel="stylesheet" href="arena-nav.css?v=2">
 </head>
 <body>
@@ -44,13 +44,23 @@
         <h1 class="brand-sm">Spectator</h1>
         <div id="status" class="status-pill">Forbinder...</div>
         <div id="controls">
+          <button id="btn-reset" type="button" disabled>Nyt spil</button>
+          <button id="btn-fullscreen" type="button">Fuldskærm</button>
           <button id="btn-start" type="button" aria-describedby="spectate-start-hint" disabled>Start spil</button>
         </div>
       </header>
       <p id="spectate-start-hint" class="spectate-hint" role="status">Venter på forbindelse…</p>
-      <div id="stats-panel"></div>
+      <div class="match-layout">
+      <div class="board-column">
       <div id="game-container">
         <canvas id="game-canvas"></canvas>
+      </div>
+      </div>
+      <aside class="match-roster" aria-label="Spilleroversigt">
+        <h2 class="roster-heading">Spillere</h2>
+        <p id="roster-count" class="roster-count"></p>
+        <div id="stats-panel"></div>
+      </aside>
       </div>
       <footer>
         <p>Du ser spillet som tilskuer</p>
@@ -59,7 +69,8 @@
     </div>
   </div>
 
-  <script src="render.js?v=2"></script>
-  <script src="spectate-client.js?v=7"></script>
+  <script src="render.js?v=3"></script>
+  <script src="player-ui.js?v=1"></script>
+  <script src="spectate-client.js?v=8"></script>
 </body>
 </html>

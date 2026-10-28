@@ -9,7 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const { URL } = require('url');
 
-const { BombermanGame, normalizeDirection, MIN_GRID_SIZE, MAX_GRID_SIZE, MAX_PLAYERS } = require('./game');
+const { BombermanGame, normalizeDirection } = require('./game');
 const { createControllerService } = require('./controller-service');
 const { startMqttBridge } = require('./mqtt-bridge');
 
@@ -27,7 +27,7 @@ function generatePin() {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
 
-function createLobby(gridSize = 13, requestedPin) {
+function createLobby(gridSize = 13, requestedPin, mode = 'classic') {
   let pin;
   if (requestedPin) {
     pin = String(requestedPin).trim().slice(0, 8);
@@ -48,8 +48,7 @@ function createLobby(gridSize = 13, requestedPin) {
       return { error: 'Kunne ikke generere unik PIN' };
     }
   }
-  const size = Math.min(MAX_GRID_SIZE, Math.max(MIN_GRID_SIZE, parseInt(gridSize, 10) || 13));
-  const game = new BombermanGame(size);
+  const game = new BombermanGame(gridSize, mode);
   lobbies.set(pin, {
     game,
     clients: new Set(),
@@ -58,7 +57,7 @@ function createLobby(gridSize = 13, requestedPin) {
     controllerDevices: new Map(),
     createdAt: Date.now(),
   });
-  return { pin, gridSize: game.gridSize };
+  return { pin, gridSize: game.gridSize, mode: game.mode, maxPlayers: game.maxPlayers };
 }
 
 function sendTo(client, type, data) {
@@ -103,21 +102,24 @@ function handleInput(pin, playerId, input) {
   const game = lobby.game;
   if (game.gameState !== 'playing') return;
 
+  let changed = false;
   switch (input.action) {
     case 'move': {
       const dir = normalizeDirection(input.direction);
-      if (dir && game.movePlayer(playerId, dir)) {
-        broadcastState(pin);
-      }
+      if (dir) changed = game.movePlayer(playerId, dir);
       break;
     }
     case 'bomb':
-      if (game.placeBomb(playerId)) {
-        broadcastState(pin);
-      }
+      changed = game.placeBomb(playerId);
       break;
     default:
       break;
+  }
+  if (changed) {
+    // Coalesce a classroom's simultaneous inputs into the next 10 Hz state push.
+    // Game input itself is still applied immediately and Classic keeps instant pushes.
+    if (game.mode === 'arena') lobby._forceSync = true;
+    else broadcastState(pin);
   }
 }
 
@@ -127,7 +129,9 @@ function getOpenLobbyList() {
     .map(([pin, lobby]) => ({
       pin,
       gridSize: lobby.game.gridSize,
-      playerCount: lobby.clients.size + (lobby.controllerPlayers?.size || 0),
+      mode: lobby.game.mode,
+      maxPlayers: lobby.game.maxPlayers,
+      playerCount: lobby.game.players.size,
       spectatorCount: (lobby.spectators || new Set()).size,
       gameState: lobby.game.gameState,
       createdAt: lobby.createdAt,
@@ -146,7 +150,9 @@ function getLobbyList() {
   return [...lobbies.entries()].map(([pin, lobby]) => ({
     pin,
     gridSize: lobby.game.gridSize,
-    playerCount: lobby.clients.size + (lobby.controllerPlayers?.size || 0),
+    mode: lobby.game.mode,
+    maxPlayers: lobby.game.maxPlayers,
+    playerCount: lobby.game.players.size,
     spectatorCount: (lobby.spectators || new Set()).size,
     gameState: lobby.game.gameState,
     createdAt: lobby.createdAt,
@@ -190,32 +196,11 @@ function handleAdminApi(req, res) {
     });
     req.on('end', () => {
       try {
-        const { pin: reqPin, gridSize = 13 } = JSON.parse(body || '{}');
-        if (reqPin) {
-          const pin = String(reqPin).slice(0, 8);
-          if (lobbies.has(pin)) {
-            res.writeHead(409);
-            res.end(JSON.stringify({ error: 'PIN eksisterer allerede', pin }));
-            return;
-          }
-          const size = Math.min(MAX_GRID_SIZE, Math.max(MIN_GRID_SIZE, parseInt(gridSize, 10) || 13));
-          const game = new BombermanGame(size);
-          lobbies.set(pin, {
-            game,
-            clients: new Set(),
-            spectators: new Set(),
-            controllerPlayers: new Map(),
-            controllerDevices: new Map(),
-            createdAt: Date.now(),
-          });
-          res.writeHead(201);
-          res.end(JSON.stringify({ pin, gridSize: game.gridSize }));
-          return;
-        }
-        const created = createLobby(gridSize);
+        const { pin: reqPin, gridSize = 13, mode = 'classic' } = JSON.parse(body || '{}');
+        const created = createLobby(gridSize, reqPin, mode);
         if (created.error) {
-          res.writeHead(500);
-          res.end(JSON.stringify({ error: created.error }));
+          res.writeHead(created.conflict ? 409 : 400);
+          res.end(JSON.stringify({ error: created.error, pin: created.pin }));
           return;
         }
         res.writeHead(201);
@@ -347,8 +332,8 @@ function handlePublicLobbyApi(req, res) {
     });
     req.on('end', () => {
       try {
-        const { gridSize = 13, pin: reqPin } = JSON.parse(body || '{}');
-        const created = createLobby(gridSize, reqPin || undefined);
+        const { gridSize = 13, pin: reqPin, mode = 'classic' } = JSON.parse(body || '{}');
+        const created = createLobby(gridSize, reqPin || undefined, mode);
         if (created.error) {
           res.writeHead(created.conflict ? 409 : 400);
           res.end(JSON.stringify({ error: created.error, pin: created.pin }));
@@ -471,8 +456,12 @@ wss.on('connection', (ws) => {
             sendTo(ws, 'error', { message: 'Ugyldig eller ukendt PIN' });
             return;
           }
-          if (lobby.game.players.size >= MAX_PLAYERS) {
-            sendTo(ws, 'error', { message: `Lobby er fuld (max ${MAX_PLAYERS} spillere)` });
+          if (lobby.game.mode === 'arena' && lobby.game.gameState === 'playing') {
+            sendTo(ws, 'error', { message: 'Klassekampen er i gang. Join mellem kampene, eller se med som tilskuer.' });
+            return;
+          }
+          if (lobby.game.players.size >= lobby.game.maxPlayers) {
+            sendTo(ws, 'error', { message: `Lobby er fuld (max ${lobby.game.maxPlayers} spillere)` });
             return;
           }
           const playerId = allocatePlayerId();
@@ -484,7 +473,7 @@ wss.on('connection', (ws) => {
           if (!added) {
             ws.playerId = null;
             ws.lobbyPin = null;
-            sendTo(ws, 'error', { message: `Lobby er fuld (max ${MAX_PLAYERS} spillere)` });
+            sendTo(ws, 'error', { message: `Lobby er fuld (max ${lobby.game.maxPlayers} spillere)` });
             return;
           }
           lobby.clients.add(ws);
@@ -631,7 +620,7 @@ setInterval(() => {
 startMqttBridge(controller);
 
 server.listen(PORT, () => {
-  console.log(`Bomberman server: http://localhost:${PORT}`);
-  console.log(`Admin: http://localhost:${PORT}/admin.html`);
-  console.log(`Spectator: http://localhost:${PORT}/spectate.html`);
+  console.log(`Bomberman server: http://localhost:${server.address().port}`);
+  console.log(`Admin: http://localhost:${server.address().port}/admin.html`);
+  console.log(`Spectator: http://localhost:${server.address().port}/spectate.html`);
 });

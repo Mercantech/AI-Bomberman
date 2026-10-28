@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
   <link rel="stylesheet" href="arena-nav.css?v=2">
 </head>
 <body>
@@ -44,13 +44,21 @@
           <input type="text" id="create-name" placeholder="Navn" maxlength="20" autocomplete="nickname">
           <label class="field-label" for="create-pin">PIN (valgfri — fx den i Arduino)</label>
           <input type="text" id="create-pin" placeholder="Tom = tilfældig" maxlength="8" autocomplete="off" inputmode="numeric">
+          <label class="field-label" for="create-mode">Spiltype</label>
+          <select id="create-mode" aria-describedby="mode-help">
+            <option value="classic">Classic · op til 4 spillere</option>
+            <option value="arena">Klassekamp · op til 24 spillere</option>
+          </select>
+          <p id="mode-help" class="panel-hint">Vælg banestørrelse til en klassisk kamp.</p>
           <label class="field-label" for="create-grid">Banestørrelse</label>
           <select id="create-grid">
             <option value="9">9×9 — hurtig</option>
             <option value="13" selected>13×13 — classic</option>
             <option value="17">17×17 — stor</option>
             <option value="21">21×21 — kaos</option>
+            <option value="31" hidden>31×31 — klassekamp</option>
           </select>
+          <label class="create-spectator-choice"><input type="checkbox" id="create-spectator"> Opret som tilskuer / fælles skærm</label>
           <button type="button" id="btn-create" class="btn-primary">Opret spil</button>
         </section>
 
@@ -96,7 +104,7 @@
 
       <div class="waiting-layout">
         <div class="waiting-players">
-          <h2>Spillere</h2>
+          <h2 id="waiting-player-count">Spillere</h2>
           <div id="player-cards" class="player-cards"></div>
         </div>
         <div class="waiting-map">
@@ -126,11 +134,14 @@
         <div id="game-status" class="status-pill">Spiller</div>
         <div id="controls">
           <button id="btn-reset" disabled>Nyt spil</button>
+          <button id="btn-fullscreen" type="button">Fuldskærm</button>
           <button type="button" id="btn-mute-game" class="btn-ghost btn-sm">Lyd</button>
         </div>
       </header>
 
-      <div id="stats-panel"></div>
+      <p id="your-player" class="your-player"></p>
+      <div class="match-layout">
+      <div class="board-column">
       <div id="game-container">
         <canvas id="game-canvas"></canvas>
         <div id="overlay" class="hidden">
@@ -142,6 +153,13 @@
         <div id="countdown" class="countdown hidden"></div>
       </div>
 
+      </div>
+      <aside class="match-roster" aria-label="Spilleroversigt">
+        <h2 class="roster-heading">Spillere</h2>
+        <p id="roster-count" class="roster-count"></p>
+        <div id="stats-panel"></div>
+      </aside>
+      </div>
       <footer>
         <p>Pil / WASD: bevæg &nbsp;|&nbsp; Mellemrum: bombe</p>
       </footer>
@@ -149,7 +167,8 @@
   </div>
 
   <script src="sfx.js?v=1"></script>
-  <script src="render.js?v=2"></script>
-  <script src="game-client.js?v=7"></script>
+  <script src="render.js?v=3"></script>
+  <script src="player-ui.js?v=1"></script>
+  <script src="game-client.js?v=8"></script>
 </body>
 </html>

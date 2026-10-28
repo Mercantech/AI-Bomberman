@@ -4,6 +4,7 @@
 
 const Sfx = window.BombermanSfx;
 const Render = window.BombermanRender;
+const PlayerUi = window.BombermanPlayerUi;
 
 let ws = null;
 let playerId = null;
@@ -21,7 +22,6 @@ let countdownActive = false;
 let lastGameState = null;
 let intentionalLeave = false;
 let stateReceivedAt = 0;
-let lastStatsKey = '';
 let lastWaitingKey = '';
 
 function apiBase() {
@@ -82,6 +82,9 @@ function init() {
   document.getElementById('btn-mute')?.addEventListener('click', toggleMute);
   document.getElementById('btn-mute-game')?.addEventListener('click', toggleMute);
 
+  document.getElementById('create-mode')?.addEventListener('change', updateCreateMode);
+  updateCreateMode();
+  PlayerUi.setupFullscreen('game-screen');
   setupControls();
   setupArduinoController();
   refreshOpenLobbies();
@@ -143,6 +146,17 @@ function leaveLobby() {
   showJoinScreen();
 }
 
+function updateCreateMode() {
+  const arena = document.getElementById('create-mode')?.value === 'arena';
+  const grid = document.getElementById('create-grid');
+  if (arena) { grid.dataset.classicSize = grid.value === '31' ? (grid.dataset.classicSize || '13') : grid.value; grid.value = '31'; }
+  else if (grid.value === '31') grid.value = grid.dataset.classicSize || '13';
+  grid.disabled = arena;
+  document.getElementById('mode-help').textContent = arena
+    ? '31×31 felter, 24 startpladser. Alle får fast nummer, farve og symbol. Tilskuerskærmen optager ingen plads.'
+    : 'Vælg banestørrelse til en klassisk kamp med op til 4 spillere.';
+}
+
 async function createLobby() {
   const err = document.getElementById('join-error');
   err.classList.add('hidden');
@@ -153,7 +167,7 @@ async function createLobby() {
     document.getElementById('name-input')?.value.trim() ||
     '';
   try {
-    const body = { gridSize: parseInt(gridSize, 10) };
+    const body = { gridSize: parseInt(gridSize, 10), mode: document.getElementById('create-mode')?.value || 'classic' };
     if (customPin) body.pin = customPin;
     const res = await fetch(`${apiBase()}/api/lobbies`, {
       method: 'POST',
@@ -173,6 +187,10 @@ async function createLobby() {
     try {
       localStorage.setItem('bm_last_pin', currentPin);
     } catch (_) {}
+    if (document.getElementById('create-spectator')?.checked) {
+      window.location.href = `spectate.html?pin=${encodeURIComponent(currentPin)}`;
+      return;
+    }
     connect();
   } catch (e) {
     err.textContent = e.message || 'Fejl ved oprettelse';
@@ -201,7 +219,7 @@ async function refreshOpenLobbies() {
       <div class="open-lobby-row" data-pin="${escapeHtml(l.pin)}">
         <div class="open-lobby-meta">
           <span class="pin">${escapeHtml(l.pin)}</span>
-          <span>${l.playerCount} spiller(e)</span>
+          <span>${l.playerCount}/${l.maxPlayers || 4} spillere · ${PlayerUi.modeLabel(l)}</span>
           <span>${l.gridSize}×${l.gridSize}</span>
         </div>
         <button type="button" class="btn-secondary btn-sm btn-join-open">Deltag</button>
@@ -308,6 +326,7 @@ function applyState(next) {
   const prev = state;
   state = next;
   stateReceivedAt = performance.now();
+  PlayerUi.updateMatchInfo(state, playerId);
   detectSfx(prev, next);
 
   if (next.gameState === 'waiting') {
@@ -405,7 +424,7 @@ function updateStatus(text, connected) {
 function updateWaitingRoom() {
   if (!state) return;
   const key = (state.players || [])
-    .map((p) => `${p.id}:${p.ready}:${p.name}`)
+    .map((p) => `${p.id}:${p.number}:${p.symbol}:${p.color}:${p.ready}:${p.name}:${p.isController}`)
     .join('|') + `:${state.gridSize}:${state.hostId}`;
   if (key === lastWaitingKey) {
     if (miniCtx && miniCanvas) Render.drawMiniMap(miniCtx, miniCanvas, state);
@@ -414,20 +433,21 @@ function updateWaitingRoom() {
   lastWaitingKey = key;
 
   document.getElementById('waiting-pin').textContent = currentPin || '----';
-  document.getElementById('waiting-grid-info').textContent = `${state.gridSize}×${state.gridSize} · classic maze`;
+  document.getElementById('waiting-grid-info').textContent = `${PlayerUi.modeLabel(state)} · ${state.gridSize}×${state.gridSize} · op til ${state.maxPlayers || 4}`;
   const me = state.players?.find((p) => p.id === playerId);
   document.getElementById('player-info').textContent = me
-    ? `Du er: ${me.name || playerId}`
+    ? `Du er ${PlayerUi.label(me)}. Find samme nummer og symbol på banen.`
     : '';
 
+  document.getElementById('waiting-player-count').textContent = `Spillere · ${state.players.length}/${state.maxPlayers || 4}`;
   const cards = document.getElementById('player-cards');
-  cards.innerHTML = (state.players || [])
+  cards.innerHTML = PlayerUi.sorted(state.players)
     .map((p) => {
       const isMe = p.id === playerId;
       const isHost = state.hostId === p.id;
       return `
       <div class="player-card ${isMe ? 'is-me' : ''} ${p.ready ? 'is-ready' : ''}">
-        <div class="player-avatar" style="background:${p.color}"></div>
+        ${PlayerUi.avatar(p, 'player-avatar')}
         <div class="player-card-info">
           <div class="player-card-name">${escapeHtml(p.name || p.id)}${isMe ? ' (dig)' : ''}</div>
           <div class="player-card-badges">
@@ -480,32 +500,7 @@ function updateOverlay() {
 }
 
 function updateStats() {
-  const panel = document.getElementById('stats-panel');
-  if (!panel || !state?.players?.length) return;
-  const key = state.players
-    .map((p) => `${p.id}:${p.alive}:${p.bombs}:${p.maxBombs}:${p.flameLength}:${p.speed}:${p.kills}`)
-    .join('|');
-  if (key === lastStatsKey) return;
-  lastStatsKey = key;
-  panel.innerHTML = state.players
-    .map((p) => {
-      const isMe = p.id === playerId;
-      return `
-      <div class="stat-card ${isMe ? 'stat-card-me' : ''} ${p.alive ? '' : 'dead'}">
-        <div class="stat-avatar" style="background:${p.color}"></div>
-        <div class="stat-details">
-          <span class="stat-name">${escapeHtml(p.name || p.id)}${isMe ? ' (dig)' : ''}</span>
-          <div class="stat-row">
-            <span><span class="stat-icon">HP</span>${p.alive ? 'OK' : 'OUT'}</span>
-            <span><span class="stat-icon">B</span>${p.bombs}/${p.maxBombs}</span>
-            <span><span class="stat-icon">F</span>${p.flameLength}</span>
-            <span><span class="stat-icon">S</span>${(p.speed || 1).toFixed(1)}</span>
-            <span><span class="stat-icon">K</span>${p.kills || 0}</span>
-          </div>
-        </div>
-      </div>`;
-    })
-    .join('');
+  PlayerUi.renderRoster(document.getElementById('stats-panel'), state, playerId);
 }
 
 function toggleReady() {
@@ -532,7 +527,7 @@ function copyPin() {
 
 function isTypingInInput() {
   const el = document.activeElement;
-  return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.getAttribute('contenteditable') === 'true');
+  return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.getAttribute('contenteditable') === 'true');
 }
 
 function setupControls() {
@@ -663,7 +658,6 @@ function renderLoop(now) {
   if (state && canvas && ctx && (state.gameState === 'playing' || state.gameState === 'ended')) {
     Render.drawFrame(ctx, canvas, renderState(now), now, { highlightId: playerId });
     updateOverlay();
-    updateStats();
   }
   requestAnimationFrame(renderLoop);
 }
