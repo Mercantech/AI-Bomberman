@@ -11,6 +11,8 @@ let canvas, ctx;
 let intentionalLeave = false;
 let stateReceivedAt = 0;
 let lastStatsKey = '';
+let spectating = false;
+let startPending = false;
 
 function apiBase() {
   const m = window.location.pathname.match(/^(\/Bomberman)(?=\/|$)/);
@@ -29,6 +31,7 @@ function init() {
   }
 
   document.getElementById('btn-watch').addEventListener('click', trySpectate);
+  document.getElementById('btn-start').addEventListener('click', startGame);
   pinInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') trySpectate();
   });
@@ -46,6 +49,9 @@ function showJoinScreen() {
   }
   state = null;
   currentPin = null;
+  spectating = false;
+  startPending = false;
+  updateControls();
   setTimeout(() => {
     intentionalLeave = false;
   }, 100);
@@ -73,6 +79,9 @@ function connect() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${protocol}//${window.location.host}${apiBase()}`;
 
+  spectating = false;
+  startPending = false;
+  updateControls();
   updateStatus('Forbinder...');
   showSpectateView();
   intentionalLeave = false;
@@ -88,14 +97,19 @@ function connect() {
       const msg = JSON.parse(event.data);
       switch (msg.type) {
         case 'spectating':
+          spectating = true;
+          startPending = false;
           state = msg.data.state;
           stateReceivedAt = performance.now();
           document.getElementById('spectate-info').textContent = `PIN: ${currentPin}`;
           updateStatus('Ser spil');
+          updateControls();
           break;
         case 'state':
           state = msg.data;
           stateReceivedAt = performance.now();
+          startPending = false;
+          updateControls();
           break;
         case 'error':
           document.getElementById('spectate-error').textContent = msg.data?.message || 'Ukendt fejl';
@@ -116,13 +130,44 @@ function connect() {
   };
 
   ws.onclose = () => {
+    spectating = false;
+    startPending = false;
+    updateControls();
     if (intentionalLeave) return;
     if (document.getElementById('spectate-view').classList.contains('hidden')) return;
     updateStatus('Forbindelse mistet…');
     setTimeout(connect, 2000);
   };
 
-  ws.onerror = () => updateStatus('Fejl');
+  ws.onerror = () => {
+    spectating = false;
+    updateControls();
+    updateStatus('Fejl');
+  };
+}
+
+function canStartGame() {
+  return spectating && ws?.readyState === WebSocket.OPEN && !startPending &&
+    state?.gameState === 'waiting' && state.players?.length >= 1;
+}
+
+function startGame() {
+  if (!canStartGame()) return;
+  startPending = true;
+  updateControls();
+  ws.send(JSON.stringify({ type: 'start' }));
+}
+
+function updateControls() {
+  document.getElementById('btn-start').disabled = !canStartGame();
+  const hint = document.getElementById('spectate-start-hint');
+  const text = !spectating || ws?.readyState !== WebSocket.OPEN ? 'Venter på forbindelse…'
+    : state?.gameState === 'playing' ? 'Spillet er i gang.'
+      : state?.gameState === 'ended' ? 'Spillet er slut.'
+        : startPending ? 'Starter spillet…'
+          : !state?.players?.length ? 'Venter på mindst én spiller.'
+            : 'Du kan starte spillet uden selv at deltage.';
+  if (hint.textContent !== text) hint.textContent = text;
 }
 
 function updateStatus(text) {

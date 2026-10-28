@@ -43,7 +43,11 @@
       <header class="game-header">
         <h1 class="brand-sm">Spectator</h1>
         <div id="status" class="status-pill">Forbinder...</div>
+        <div id="controls">
+          <button id="btn-start" type="button" aria-describedby="spectate-start-hint" disabled>Start spil</button>
+        </div>
       </header>
+      <p id="spectate-start-hint" class="spectate-hint" role="status">Venter på forbindelse…</p>
       <div id="stats-panel"></div>
       <div id="game-container">
         <canvas id="game-canvas"></canvas>
@@ -56,6 +60,6 @@
   </div>
 
   <script src="render.js?v=2"></script>
-  <script src="spectate-client.js?v=6"></script>
+  <script src="spectate-client.js?v=7"></script>
 </body>
 </html>

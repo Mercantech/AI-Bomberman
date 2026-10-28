@@ -56,6 +56,8 @@ Offentlig API: `GET/POST /api/lobbies` (kun waiting-lobbies i listen).
 
 - Gå til `/spectate.html`
 - Indtast PIN for at se spillet som tilskuer uden at deltage
+- Tryk **Start spil** på Spectate-siden, når mindst én spiller er med, og lobbyen venter. Det virker også med kun Arduino-spillere.
+- Tilskueren optager ingen spillerplads. Startknappen er deaktiveret under spillet og ved mistet forbindelse.
 
 ## Styring
 
